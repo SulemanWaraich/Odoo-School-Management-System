@@ -15,6 +15,9 @@ import AttendanceOverview from './pages/admin/AttendanceOverview';
 import AssignmentOverview from './pages/admin/AssignmentOverview';
 import ProgressOverview from './pages/admin/ProgressOverview';
 import AnnouncementManagement from './pages/admin/AnnouncementManagement';
+import UserManagement from './pages/admin/UserManagement';
+import SetupWizard from './pages/admin/SetupWizard';
+import Reports from './pages/admin/Reports';
 import TeacherDashboard from './pages/teacher/TeacherDashboard';
 import TeacherCourses from './pages/teacher/TeacherCourses';
 import TeacherAttendance from './pages/teacher/TeacherAttendance';
@@ -112,6 +115,21 @@ const AppRouter = () => {
       <Route path="/admin/announcements" element={
         <ProtectedRoute allowedRoles={['admin']}>
           <AnnouncementManagement />
+        </ProtectedRoute>
+      } />
+      <Route path="/admin/users" element={
+        <ProtectedRoute allowedRoles={['admin']}>
+          <UserManagement />
+        </ProtectedRoute>
+      } />
+      <Route path="/admin/setup" element={
+        <ProtectedRoute allowedRoles={['admin']}>
+          <SetupWizard />
+        </ProtectedRoute>
+      } />
+      <Route path="/admin/reports" element={
+        <ProtectedRoute allowedRoles={['admin']}>
+          <Reports />
         </ProtectedRoute>
       } />
 

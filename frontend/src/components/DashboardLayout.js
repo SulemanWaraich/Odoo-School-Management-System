@@ -3,7 +3,8 @@ import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import {
   LayoutDashboard, Users, GraduationCap, BookOpen, ClipboardCheck,
-  FileText, TrendingUp, Megaphone, LogOut, Menu, X, ChevronDown
+  FileText, TrendingUp, Megaphone, LogOut, Menu, X, ChevronDown,
+  UserCog, Settings, BarChart3
 } from 'lucide-react';
 import { Button } from './ui/button';
 import {
@@ -16,6 +17,7 @@ import { Avatar, AvatarFallback, AvatarImage } from './ui/avatar';
 
 const adminNavItems = [
   { path: '/admin', label: 'Dashboard', icon: LayoutDashboard },
+  { path: '/admin/users', label: 'User Management', icon: UserCog },
   { path: '/admin/students', label: 'Students', icon: Users },
   { path: '/admin/teachers', label: 'Teachers', icon: GraduationCap },
   { path: '/admin/courses', label: 'Courses', icon: BookOpen },
@@ -23,6 +25,8 @@ const adminNavItems = [
   { path: '/admin/assignments', label: 'Assignments', icon: FileText },
   { path: '/admin/progress', label: 'Progress', icon: TrendingUp },
   { path: '/admin/announcements', label: 'Announcements', icon: Megaphone },
+  { path: '/admin/reports', label: 'Reports', icon: BarChart3 },
+  { path: '/admin/setup', label: 'Setup Wizard', icon: Settings },
 ];
 
 const teacherNavItems = [

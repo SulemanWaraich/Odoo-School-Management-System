@@ -475,6 +475,807 @@ async def update_user_role(user_id: str, request: Request):
     
     return {"message": "Role updated"}
 
+# Extended User Management
+@api_router.get("/admin/users/all")
+async def get_all_users_detailed(request: Request, search: Optional[str] = None, role: Optional[str] = None, status: Optional[str] = None):
+    await require_role("admin")(request)
+    
+    query = {}
+    if role and role != "all":
+        query["role"] = role
+    if status == "active":
+        query["is_active"] = {"$ne": False}
+    elif status == "inactive":
+        query["is_active"] = False
+    if search:
+        query["$or"] = [
+            {"name": {"$regex": search, "$options": "i"}},
+            {"email": {"$regex": search, "$options": "i"}}
+        ]
+    
+    users = await db.users.find(query, {"_id": 0, "password_hash": 0}).to_list(1000)
+    return users
+
+@api_router.put("/admin/users/{user_id}/status")
+async def toggle_user_status(user_id: str, request: Request):
+    await require_role("admin")(request)
+    body = await request.json()
+    is_active = body.get("is_active", True)
+    
+    result = await db.users.update_one({"user_id": user_id}, {"$set": {"is_active": is_active}})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    return {"message": "User status updated"}
+
+@api_router.post("/admin/users/{user_id}/reset-password")
+async def reset_user_password(user_id: str, request: Request):
+    await require_role("admin")(request)
+    body = await request.json()
+    new_password = body.get("password")
+    
+    if not new_password or len(new_password) < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+    
+    hashed = hash_password(new_password)
+    result = await db.users.update_one({"user_id": user_id}, {"$set": {"password_hash": hashed}})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    return {"message": "Password reset successfully"}
+
+@api_router.delete("/admin/users/{user_id}")
+async def delete_user(user_id: str, request: Request):
+    current_user = await require_role("admin")(request)
+    
+    if current_user["user_id"] == user_id:
+        raise HTTPException(status_code=400, detail="Cannot delete your own account")
+    
+    user = await db.users.find_one({"user_id": user_id}, {"_id": 0})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Delete associated profiles
+    if user["role"] == "student":
+        student = await db.students.find_one({"user_id": user_id}, {"_id": 0})
+        if student:
+            await db.students.delete_one({"user_id": user_id})
+            await db.enrollments.delete_many({"student_id": student["id"]})
+            await db.attendance_records.delete_many({"student_id": student["id"]})
+            await db.submissions.delete_many({"student_id": student["id"]})
+            await db.weekly_progress.delete_many({"student_id": student["id"]})
+    elif user["role"] == "teacher":
+        teacher = await db.teachers.find_one({"user_id": user_id}, {"_id": 0})
+        if teacher:
+            await db.teachers.delete_one({"user_id": user_id})
+            await db.courses.update_many({"teacher_id": teacher["id"]}, {"$set": {"teacher_id": None}})
+    
+    await db.users.delete_one({"user_id": user_id})
+    await db.user_sessions.delete_many({"user_id": user_id})
+    
+    return {"message": "User deleted successfully"}
+
+@api_router.post("/admin/users/create")
+async def admin_create_user(request: Request):
+    await require_role("admin")(request)
+    body = await request.json()
+    
+    email = body.get("email", "").lower()
+    name = body.get("name", "")
+    role = body.get("role", "student")
+    password = body.get("password", "")
+    
+    if not email or not name or not password:
+        raise HTTPException(status_code=400, detail="Email, name, and password are required")
+    
+    if len(password) < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+    
+    existing = await db.users.find_one({"email": email})
+    if existing:
+        raise HTTPException(status_code=400, detail="Email already registered")
+    
+    user_id = f"user_{uuid.uuid4().hex[:12]}"
+    hashed = hash_password(password)
+    
+    user_doc = {
+        "user_id": user_id,
+        "email": email,
+        "name": name,
+        "role": role,
+        "password_hash": hashed,
+        "is_active": True,
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    await db.users.insert_one(user_doc)
+    
+    # Create profile based on role
+    if role == "student":
+        extra_data = body.get("student_data", {})
+        student_doc = {
+            "id": f"std_{uuid.uuid4().hex[:8]}",
+            "user_id": user_id,
+            "student_id": extra_data.get("student_id", f"STD{uuid.uuid4().hex[:6].upper()}"),
+            "grade": extra_data.get("grade", ""),
+            "section": extra_data.get("section", ""),
+            "parent_contact": extra_data.get("parent_contact", ""),
+            "created_at": datetime.now(timezone.utc).isoformat()
+        }
+        await db.students.insert_one(student_doc)
+    elif role == "teacher":
+        extra_data = body.get("teacher_data", {})
+        teacher_doc = {
+            "id": f"tch_{uuid.uuid4().hex[:8]}",
+            "user_id": user_id,
+            "employee_id": extra_data.get("employee_id", f"TCH{uuid.uuid4().hex[:6].upper()}"),
+            "department": extra_data.get("department", ""),
+            "qualification": extra_data.get("qualification", ""),
+            "created_at": datetime.now(timezone.utc).isoformat()
+        }
+        await db.teachers.insert_one(teacher_doc)
+    
+    return {"id": user_id, "email": email, "name": name, "role": role}
+
+# ================== SETUP WIZARD ENDPOINTS ==================
+
+class SchoolProfileCreate(BaseModel):
+    name: str
+    address: Optional[str] = None
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    principal: Optional[str] = None
+    logo_url: Optional[str] = None
+
+class AcademicTermCreate(BaseModel):
+    name: str
+    start_date: str
+    end_date: str
+    is_current: bool = False
+
+@api_router.get("/setup/status")
+async def get_setup_status(request: Request):
+    await require_role("admin")(request)
+    
+    school = await db.school_profile.find_one({}, {"_id": 0})
+    terms = await db.academic_terms.count_documents({})
+    courses = await db.courses.count_documents({})
+    teachers = await db.teachers.count_documents({})
+    students = await db.students.count_documents({})
+    
+    return {
+        "has_school_profile": school is not None,
+        "has_academic_terms": terms > 0,
+        "has_courses": courses > 0,
+        "has_teachers": teachers > 0,
+        "has_students": students > 0,
+        "school_profile": school,
+        "counts": {
+            "terms": terms,
+            "courses": courses,
+            "teachers": teachers,
+            "students": students
+        }
+    }
+
+@api_router.post("/setup/school-profile")
+async def create_school_profile(data: SchoolProfileCreate, request: Request):
+    await require_role("admin")(request)
+    
+    existing = await db.school_profile.find_one({})
+    
+    profile_doc = {
+        "name": data.name,
+        "address": data.address,
+        "phone": data.phone,
+        "email": data.email,
+        "principal": data.principal,
+        "logo_url": data.logo_url,
+        "updated_at": datetime.now(timezone.utc).isoformat()
+    }
+    
+    if existing:
+        await db.school_profile.update_one({}, {"$set": profile_doc})
+    else:
+        profile_doc["created_at"] = datetime.now(timezone.utc).isoformat()
+        await db.school_profile.insert_one(profile_doc)
+    
+    return {"message": "School profile saved"}
+
+@api_router.get("/setup/school-profile")
+async def get_school_profile(request: Request):
+    await get_current_user(request)
+    profile = await db.school_profile.find_one({}, {"_id": 0})
+    return profile or {}
+
+@api_router.get("/academic-terms")
+async def get_academic_terms(request: Request):
+    await get_current_user(request)
+    terms = await db.academic_terms.find({}, {"_id": 0}).sort("start_date", -1).to_list(100)
+    return terms
+
+@api_router.post("/academic-terms")
+async def create_academic_term(data: AcademicTermCreate, request: Request):
+    await require_role("admin")(request)
+    
+    if data.is_current:
+        await db.academic_terms.update_many({}, {"$set": {"is_current": False}})
+    
+    term_doc = {
+        "id": f"term_{uuid.uuid4().hex[:8]}",
+        "name": data.name,
+        "start_date": data.start_date,
+        "end_date": data.end_date,
+        "is_current": data.is_current,
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    await db.academic_terms.insert_one(term_doc)
+    
+    return {"id": term_doc["id"], "message": "Academic term created"}
+
+@api_router.delete("/academic-terms/{term_id}")
+async def delete_academic_term(term_id: str, request: Request):
+    await require_role("admin")(request)
+    result = await db.academic_terms.delete_one({"id": term_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Term not found")
+    return {"message": "Term deleted"}
+
+@api_router.post("/setup/bulk-import/students")
+async def bulk_import_students(request: Request):
+    await require_role("admin")(request)
+    body = await request.json()
+    students_data = body.get("students", [])
+    
+    created = 0
+    errors = []
+    
+    for idx, s in enumerate(students_data):
+        try:
+            email = s.get("email", "").lower()
+            name = s.get("name", "")
+            
+            if not email or not name:
+                errors.append(f"Row {idx+1}: Missing email or name")
+                continue
+            
+            existing = await db.users.find_one({"email": email})
+            if existing:
+                errors.append(f"Row {idx+1}: Email {email} already exists")
+                continue
+            
+            user_id = f"user_{uuid.uuid4().hex[:12]}"
+            password = s.get("password", "student123")
+            hashed = hash_password(password)
+            
+            await db.users.insert_one({
+                "user_id": user_id,
+                "email": email,
+                "name": name,
+                "role": "student",
+                "password_hash": hashed,
+                "is_active": True,
+                "created_at": datetime.now(timezone.utc).isoformat()
+            })
+            
+            await db.students.insert_one({
+                "id": f"std_{uuid.uuid4().hex[:8]}",
+                "user_id": user_id,
+                "student_id": s.get("student_id", f"STD{uuid.uuid4().hex[:6].upper()}"),
+                "grade": s.get("grade", ""),
+                "section": s.get("section", ""),
+                "parent_contact": s.get("parent_contact", ""),
+                "created_at": datetime.now(timezone.utc).isoformat()
+            })
+            
+            created += 1
+        except Exception as e:
+            errors.append(f"Row {idx+1}: {str(e)}")
+    
+    return {"created": created, "errors": errors}
+
+@api_router.post("/setup/bulk-import/teachers")
+async def bulk_import_teachers(request: Request):
+    await require_role("admin")(request)
+    body = await request.json()
+    teachers_data = body.get("teachers", [])
+    
+    created = 0
+    errors = []
+    
+    for idx, t in enumerate(teachers_data):
+        try:
+            email = t.get("email", "").lower()
+            name = t.get("name", "")
+            
+            if not email or not name:
+                errors.append(f"Row {idx+1}: Missing email or name")
+                continue
+            
+            existing = await db.users.find_one({"email": email})
+            if existing:
+                errors.append(f"Row {idx+1}: Email {email} already exists")
+                continue
+            
+            user_id = f"user_{uuid.uuid4().hex[:12]}"
+            password = t.get("password", "teacher123")
+            hashed = hash_password(password)
+            
+            await db.users.insert_one({
+                "user_id": user_id,
+                "email": email,
+                "name": name,
+                "role": "teacher",
+                "password_hash": hashed,
+                "is_active": True,
+                "created_at": datetime.now(timezone.utc).isoformat()
+            })
+            
+            await db.teachers.insert_one({
+                "id": f"tch_{uuid.uuid4().hex[:8]}",
+                "user_id": user_id,
+                "employee_id": t.get("employee_id", f"TCH{uuid.uuid4().hex[:6].upper()}"),
+                "department": t.get("department", ""),
+                "qualification": t.get("qualification", ""),
+                "created_at": datetime.now(timezone.utc).isoformat()
+            })
+            
+            created += 1
+        except Exception as e:
+            errors.append(f"Row {idx+1}: {str(e)}")
+    
+    return {"created": created, "errors": errors}
+
+@api_router.post("/setup/quick-courses")
+async def quick_create_courses(request: Request):
+    await require_role("admin")(request)
+    body = await request.json()
+    courses_data = body.get("courses", [])
+    
+    created = 0
+    errors = []
+    
+    for idx, c in enumerate(courses_data):
+        try:
+            name = c.get("name", "")
+            code = c.get("code", "")
+            
+            if not name or not code:
+                errors.append(f"Row {idx+1}: Missing name or code")
+                continue
+            
+            existing = await db.courses.find_one({"code": code})
+            if existing:
+                errors.append(f"Row {idx+1}: Course code {code} already exists")
+                continue
+            
+            await db.courses.insert_one({
+                "id": f"crs_{uuid.uuid4().hex[:8]}",
+                "name": name,
+                "code": code,
+                "description": c.get("description", ""),
+                "grade": c.get("grade", ""),
+                "teacher_id": c.get("teacher_id"),
+                "created_at": datetime.now(timezone.utc).isoformat()
+            })
+            
+            created += 1
+        except Exception as e:
+            errors.append(f"Row {idx+1}: {str(e)}")
+    
+    return {"created": created, "errors": errors}
+
+@api_router.post("/setup/bulk-enroll")
+async def bulk_enroll_students(request: Request):
+    await require_role("admin")(request)
+    body = await request.json()
+    course_id = body.get("course_id")
+    student_ids = body.get("student_ids", [])
+    
+    if not course_id or not student_ids:
+        raise HTTPException(status_code=400, detail="Course ID and student IDs required")
+    
+    enrolled = 0
+    for student_id in student_ids:
+        existing = await db.enrollments.find_one({"student_id": student_id, "course_id": course_id})
+        if not existing:
+            await db.enrollments.insert_one({
+                "id": f"enr_{uuid.uuid4().hex[:8]}",
+                "student_id": student_id,
+                "course_id": course_id,
+                "enrolled_at": datetime.now(timezone.utc).isoformat()
+            })
+            enrolled += 1
+    
+    return {"enrolled": enrolled}
+
+# ================== REPORTS ENDPOINTS ==================
+
+@api_router.get("/reports/attendance")
+async def attendance_report(
+    request: Request,
+    course_id: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    format: str = "json"
+):
+    user = await get_current_user(request)
+    if user["role"] not in ["admin", "teacher"]:
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    query = {}
+    if course_id:
+        query["course_id"] = course_id
+    if start_date and end_date:
+        query["date"] = {"$gte": start_date, "$lte": end_date}
+    
+    # Filter for teacher's courses only
+    if user["role"] == "teacher":
+        teacher = await db.teachers.find_one({"user_id": user["user_id"]}, {"_id": 0})
+        if teacher:
+            courses = await db.courses.find({"teacher_id": teacher["id"]}, {"_id": 0}).to_list(1000)
+            course_ids = [c["id"] for c in courses]
+            query["course_id"] = {"$in": course_ids}
+    
+    records = await db.attendance_records.find(query, {"_id": 0}).to_list(10000)
+    
+    # Get student and course names
+    student_map = {}
+    students = await db.students.find({}, {"_id": 0}).to_list(1000)
+    for s in students:
+        user_data = await db.users.find_one({"user_id": s["user_id"]}, {"_id": 0, "password_hash": 0})
+        student_map[s["id"]] = {"name": user_data["name"] if user_data else "Unknown", "student_id": s["student_id"]}
+    
+    course_map = {}
+    courses = await db.courses.find({}, {"_id": 0}).to_list(1000)
+    for c in courses:
+        course_map[c["id"]] = c["name"]
+    
+    # Calculate summary
+    summary = {
+        "total_records": len(records),
+        "present": len([r for r in records if r["status"] == "present"]),
+        "absent": len([r for r in records if r["status"] == "absent"]),
+        "late": len([r for r in records if r["status"] == "late"]),
+        "excused": len([r for r in records if r["status"] == "excused"]),
+    }
+    
+    # Enrich records
+    enriched = []
+    for r in records:
+        enriched.append({
+            **r,
+            "student_name": student_map.get(r["student_id"], {}).get("name", "Unknown"),
+            "student_code": student_map.get(r["student_id"], {}).get("student_id", ""),
+            "course_name": course_map.get(r["course_id"], "Unknown")
+        })
+    
+    return {"summary": summary, "records": enriched}
+
+@api_router.get("/reports/assignments")
+async def assignment_report(
+    request: Request,
+    course_id: Optional[str] = None
+):
+    user = await get_current_user(request)
+    if user["role"] not in ["admin", "teacher"]:
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    query = {}
+    if course_id:
+        query["course_id"] = course_id
+    
+    if user["role"] == "teacher":
+        teacher = await db.teachers.find_one({"user_id": user["user_id"]}, {"_id": 0})
+        if teacher:
+            courses = await db.courses.find({"teacher_id": teacher["id"]}, {"_id": 0}).to_list(1000)
+            course_ids = [c["id"] for c in courses]
+            query["course_id"] = {"$in": course_ids}
+    
+    assignments = await db.assignments.find(query, {"_id": 0}).to_list(1000)
+    
+    # Get course names
+    course_map = {}
+    courses = await db.courses.find({}, {"_id": 0}).to_list(1000)
+    for c in courses:
+        course_map[c["id"]] = c["name"]
+    
+    # Get submission stats per assignment
+    report = []
+    for a in assignments:
+        submissions = await db.submissions.find({"assignment_id": a["id"]}, {"_id": 0}).to_list(1000)
+        
+        # Get enrolled students count
+        enrollments = await db.enrollments.find({"course_id": a["course_id"]}, {"_id": 0}).to_list(1000)
+        total_students = len(enrollments)
+        
+        report.append({
+            **a,
+            "course_name": course_map.get(a["course_id"], "Unknown"),
+            "total_students": total_students,
+            "submitted_count": len(submissions),
+            "pending_count": total_students - len(submissions),
+            "submission_rate": round((len(submissions) / total_students * 100) if total_students > 0 else 0, 1)
+        })
+    
+    summary = {
+        "total_assignments": len(report),
+        "total_submissions": sum([r["submitted_count"] for r in report]),
+        "avg_submission_rate": round(sum([r["submission_rate"] for r in report]) / len(report) if report else 0, 1)
+    }
+    
+    return {"summary": summary, "assignments": report}
+
+@api_router.get("/reports/progress")
+async def progress_report(
+    request: Request,
+    course_id: Optional[str] = None,
+    student_id: Optional[str] = None
+):
+    user = await get_current_user(request)
+    if user["role"] not in ["admin", "teacher"]:
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    query = {}
+    if course_id:
+        query["course_id"] = course_id
+    if student_id:
+        query["student_id"] = student_id
+    
+    if user["role"] == "teacher":
+        teacher = await db.teachers.find_one({"user_id": user["user_id"]}, {"_id": 0})
+        if teacher:
+            courses = await db.courses.find({"teacher_id": teacher["id"]}, {"_id": 0}).to_list(1000)
+            course_ids = [c["id"] for c in courses]
+            query["course_id"] = {"$in": course_ids}
+    
+    progress = await db.weekly_progress.find(query, {"_id": 0}).sort("week_start", -1).to_list(1000)
+    
+    # Get student and course names
+    student_map = {}
+    students = await db.students.find({}, {"_id": 0}).to_list(1000)
+    for s in students:
+        user_data = await db.users.find_one({"user_id": s["user_id"]}, {"_id": 0, "password_hash": 0})
+        student_map[s["id"]] = user_data["name"] if user_data else "Unknown"
+    
+    course_map = {}
+    courses = await db.courses.find({}, {"_id": 0}).to_list(1000)
+    for c in courses:
+        course_map[c["id"]] = c["name"]
+    
+    # Calculate summary
+    scores = [p["performance_score"] for p in progress if p.get("performance_score")]
+    summary = {
+        "total_records": len(progress),
+        "avg_score": round(sum(scores) / len(scores) if scores else 0, 1),
+        "highest_score": max(scores) if scores else 0,
+        "lowest_score": min(scores) if scores else 0
+    }
+    
+    # Enrich records
+    enriched = []
+    for p in progress:
+        enriched.append({
+            **p,
+            "student_name": student_map.get(p["student_id"], "Unknown"),
+            "course_name": course_map.get(p["course_id"], "Unknown")
+        })
+    
+    return {"summary": summary, "records": enriched}
+
+@api_router.get("/reports/class-summary")
+async def class_summary_report(request: Request, course_id: str):
+    user = await get_current_user(request)
+    if user["role"] not in ["admin", "teacher"]:
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    course = await db.courses.find_one({"id": course_id}, {"_id": 0})
+    if not course:
+        raise HTTPException(status_code=404, detail="Course not found")
+    
+    # Get enrolled students
+    enrollments = await db.enrollments.find({"course_id": course_id}, {"_id": 0}).to_list(1000)
+    student_ids = [e["student_id"] for e in enrollments]
+    
+    students_data = []
+    for sid in student_ids:
+        student = await db.students.find_one({"id": sid}, {"_id": 0})
+        if not student:
+            continue
+        user_data = await db.users.find_one({"user_id": student["user_id"]}, {"_id": 0, "password_hash": 0})
+        
+        # Attendance stats
+        attendance = await db.attendance_records.find({"student_id": sid, "course_id": course_id}, {"_id": 0}).to_list(1000)
+        total_att = len(attendance)
+        present = len([a for a in attendance if a["status"] == "present"])
+        att_percentage = round((present / total_att * 100) if total_att > 0 else 0, 1)
+        
+        # Assignment stats
+        assignments = await db.assignments.find({"course_id": course_id}, {"_id": 0}).to_list(1000)
+        assignment_ids = [a["id"] for a in assignments]
+        submissions = await db.submissions.find({"student_id": sid, "assignment_id": {"$in": assignment_ids}}, {"_id": 0}).to_list(1000)
+        
+        # Progress stats
+        progress = await db.weekly_progress.find({"student_id": sid, "course_id": course_id}, {"_id": 0}).to_list(100)
+        scores = [p["performance_score"] for p in progress if p.get("performance_score")]
+        avg_score = round(sum(scores) / len(scores) if scores else 0, 1)
+        
+        students_data.append({
+            "student_id": student["student_id"],
+            "name": user_data["name"] if user_data else "Unknown",
+            "grade": student.get("grade", ""),
+            "section": student.get("section", ""),
+            "attendance_percentage": att_percentage,
+            "assignments_submitted": len(submissions),
+            "assignments_total": len(assignments),
+            "avg_progress_score": avg_score
+        })
+    
+    # Course summary
+    summary = {
+        "course_name": course["name"],
+        "course_code": course["code"],
+        "total_students": len(students_data),
+        "avg_attendance": round(sum([s["attendance_percentage"] for s in students_data]) / len(students_data) if students_data else 0, 1),
+        "avg_progress_score": round(sum([s["avg_progress_score"] for s in students_data]) / len(students_data) if students_data else 0, 1)
+    }
+    
+    return {"summary": summary, "students": students_data}
+
+@api_router.get("/reports/student-performance/{student_id}")
+async def student_performance_report(student_id: str, request: Request):
+    user = await get_current_user(request)
+    if user["role"] not in ["admin", "teacher"]:
+        # Allow student to view their own report
+        if user["role"] == "student":
+            student = await db.students.find_one({"user_id": user["user_id"]}, {"_id": 0})
+            if not student or student["id"] != student_id:
+                raise HTTPException(status_code=403, detail="Access denied")
+        else:
+            raise HTTPException(status_code=403, detail="Access denied")
+    
+    student = await db.students.find_one({"id": student_id}, {"_id": 0})
+    if not student:
+        raise HTTPException(status_code=404, detail="Student not found")
+    
+    user_data = await db.users.find_one({"user_id": student["user_id"]}, {"_id": 0, "password_hash": 0})
+    
+    # Get enrolled courses
+    enrollments = await db.enrollments.find({"student_id": student_id}, {"_id": 0}).to_list(100)
+    course_ids = [e["course_id"] for e in enrollments]
+    
+    courses_data = []
+    for cid in course_ids:
+        course = await db.courses.find_one({"id": cid}, {"_id": 0})
+        if not course:
+            continue
+        
+        # Attendance
+        attendance = await db.attendance_records.find({"student_id": student_id, "course_id": cid}, {"_id": 0}).to_list(1000)
+        total_att = len(attendance)
+        present = len([a for a in attendance if a["status"] == "present"])
+        
+        # Assignments
+        assignments = await db.assignments.find({"course_id": cid}, {"_id": 0}).to_list(100)
+        assignment_ids = [a["id"] for a in assignments]
+        submissions = await db.submissions.find({"student_id": student_id, "assignment_id": {"$in": assignment_ids}}, {"_id": 0}).to_list(100)
+        
+        # Progress
+        progress = await db.weekly_progress.find({"student_id": student_id, "course_id": cid}, {"_id": 0}).sort("week_start", -1).to_list(10)
+        scores = [p["performance_score"] for p in progress if p.get("performance_score")]
+        
+        courses_data.append({
+            "course_id": cid,
+            "course_name": course["name"],
+            "course_code": course["code"],
+            "attendance_percentage": round((present / total_att * 100) if total_att > 0 else 0, 1),
+            "attendance_present": present,
+            "attendance_total": total_att,
+            "assignments_submitted": len(submissions),
+            "assignments_total": len(assignments),
+            "progress_scores": scores,
+            "avg_progress_score": round(sum(scores) / len(scores) if scores else 0, 1)
+        })
+    
+    # Overall summary
+    all_scores = []
+    for c in courses_data:
+        all_scores.extend(c["progress_scores"])
+    
+    summary = {
+        "student_id": student["student_id"],
+        "name": user_data["name"] if user_data else "Unknown",
+        "email": user_data["email"] if user_data else "",
+        "grade": student.get("grade", ""),
+        "section": student.get("section", ""),
+        "total_courses": len(courses_data),
+        "overall_attendance": round(sum([c["attendance_percentage"] for c in courses_data]) / len(courses_data) if courses_data else 0, 1),
+        "overall_progress_score": round(sum(all_scores) / len(all_scores) if all_scores else 0, 1)
+    }
+    
+    return {"summary": summary, "courses": courses_data}
+
+@api_router.get("/reports/export/{report_type}")
+async def export_report(report_type: str, request: Request, course_id: Optional[str] = None, format: str = "csv"):
+    user = await get_current_user(request)
+    if user["role"] not in ["admin", "teacher"]:
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    import csv
+    import io
+    from fastapi.responses import StreamingResponse
+    
+    if report_type == "attendance":
+        data = await attendance_report(request, course_id)
+        records = data["records"]
+        
+        if format == "csv":
+            output = io.StringIO()
+            writer = csv.DictWriter(output, fieldnames=["date", "student_name", "student_code", "course_name", "status"])
+            writer.writeheader()
+            for r in records:
+                writer.writerow({
+                    "date": r["date"],
+                    "student_name": r["student_name"],
+                    "student_code": r["student_code"],
+                    "course_name": r["course_name"],
+                    "status": r["status"]
+                })
+            output.seek(0)
+            return StreamingResponse(
+                iter([output.getvalue()]),
+                media_type="text/csv",
+                headers={"Content-Disposition": "attachment; filename=attendance_report.csv"}
+            )
+    
+    elif report_type == "assignments":
+        data = await assignment_report(request, course_id)
+        assignments = data["assignments"]
+        
+        if format == "csv":
+            output = io.StringIO()
+            writer = csv.DictWriter(output, fieldnames=["title", "course_name", "due_date", "total_students", "submitted_count", "submission_rate"])
+            writer.writeheader()
+            for a in assignments:
+                writer.writerow({
+                    "title": a["title"],
+                    "course_name": a["course_name"],
+                    "due_date": a["due_date"],
+                    "total_students": a["total_students"],
+                    "submitted_count": a["submitted_count"],
+                    "submission_rate": f"{a['submission_rate']}%"
+                })
+            output.seek(0)
+            return StreamingResponse(
+                iter([output.getvalue()]),
+                media_type="text/csv",
+                headers={"Content-Disposition": "attachment; filename=assignments_report.csv"}
+            )
+    
+    elif report_type == "progress":
+        data = await progress_report(request, course_id)
+        records = data["records"]
+        
+        if format == "csv":
+            output = io.StringIO()
+            writer = csv.DictWriter(output, fieldnames=["week_start", "student_name", "course_name", "performance_score", "remarks"])
+            writer.writeheader()
+            for r in records:
+                writer.writerow({
+                    "week_start": r["week_start"],
+                    "student_name": r["student_name"],
+                    "course_name": r["course_name"],
+                    "performance_score": r.get("performance_score", ""),
+                    "remarks": r.get("remarks", "")
+                })
+            output.seek(0)
+            return StreamingResponse(
+                iter([output.getvalue()]),
+                media_type="text/csv",
+                headers={"Content-Disposition": "attachment; filename=progress_report.csv"}
+            )
+    
+    raise HTTPException(status_code=400, detail="Invalid report type or format")
+
 # ================== STUDENT ENDPOINTS ==================
 
 @api_router.get("/students")
