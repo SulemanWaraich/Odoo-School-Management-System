@@ -243,12 +243,12 @@ const CourseManagement = () => {
               </div>
               <div className="space-y-2">
                 <Label htmlFor="teacher">Assign Teacher</Label>
-                <Select value={form.teacher_id} onValueChange={(value) => setForm({...form, teacher_id: value})}>
+                <Select value={form.teacher_id || "none"} onValueChange={(value) => setForm({...form, teacher_id: value === "none" ? "" : value})}>
                   <SelectTrigger data-testid="course-teacher-select">
                     <SelectValue placeholder="Select teacher" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">No teacher</SelectItem>
+                    <SelectItem value="none">No teacher</SelectItem>
                     {teachers.map((teacher) => (
                       <SelectItem key={teacher.id} value={teacher.id}>
                         {teacher.user?.name || teacher.employee_id}

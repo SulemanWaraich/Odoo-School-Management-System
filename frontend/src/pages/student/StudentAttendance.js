@@ -150,12 +150,12 @@ const StudentAttendance = () => {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <Select value={selectedCourse} onValueChange={setSelectedCourse}>
+            <Select value={selectedCourse || "all"} onValueChange={(value) => setSelectedCourse(value === "all" ? "" : value)}>
               <SelectTrigger data-testid="attendance-course-filter">
                 <SelectValue placeholder="All courses" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="">All courses</SelectItem>
+                <SelectItem value="all">All courses</SelectItem>
                 {courses.map((course) => (
                   <SelectItem key={course.id} value={course.id}>
                     {course.name}

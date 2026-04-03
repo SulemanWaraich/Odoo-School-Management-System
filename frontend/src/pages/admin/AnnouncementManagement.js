@@ -188,12 +188,12 @@ const AnnouncementManagement = () => {
               </div>
               <div className="space-y-2">
                 <Label>Course (Optional)</Label>
-                <Select value={form.course_id} onValueChange={(value) => setForm({...form, course_id: value})}>
+                <Select value={form.course_id || "all"} onValueChange={(value) => setForm({...form, course_id: value === "all" ? "" : value})}>
                   <SelectTrigger data-testid="announcement-course-select">
                     <SelectValue placeholder="All courses" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">All courses</SelectItem>
+                    <SelectItem value="all">All courses</SelectItem>
                     {courses.map((course) => (
                       <SelectItem key={course.id} value={course.id}>
                         {course.name}

@@ -121,12 +121,12 @@ const AssignmentOverview = () => {
                 data-testid="assignment-search-input"
               />
             </div>
-            <Select value={selectedCourse} onValueChange={setSelectedCourse}>
+            <Select value={selectedCourse || "all"} onValueChange={(value) => setSelectedCourse(value === "all" ? "" : value)}>
               <SelectTrigger className="w-48" data-testid="assignment-course-filter">
                 <SelectValue placeholder="All courses" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="">All courses</SelectItem>
+                <SelectItem value="all">All courses</SelectItem>
                 {courses.map((course) => (
                   <SelectItem key={course.id} value={course.id}>
                     {course.name}

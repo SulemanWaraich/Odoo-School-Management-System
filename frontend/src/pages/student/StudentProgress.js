@@ -120,12 +120,12 @@ const StudentProgress = () => {
             <CardTitle className="text-sm font-medium text-slate-500">Filter by Course</CardTitle>
           </CardHeader>
           <CardContent>
-            <Select value={selectedCourse} onValueChange={setSelectedCourse}>
+            <Select value={selectedCourse || "all"} onValueChange={(value) => setSelectedCourse(value === "all" ? "" : value)}>
               <SelectTrigger data-testid="progress-course-filter">
                 <SelectValue placeholder="All courses" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="">All courses</SelectItem>
+                <SelectItem value="all">All courses</SelectItem>
                 {courses.map((course) => (
                   <SelectItem key={course.id} value={course.id}>
                     {course.name}
