@@ -73,6 +73,38 @@ class SchoolManagementAPITester:
         else:
             return self.log_test("Admin Login", False, f"Status: {status}, Response: {response}")
 
+    def test_teacher_login(self):
+        """Test teacher login with sarah.johnson@school.com"""
+        success, response, status = self.make_request(
+            'POST', 'auth/login',
+            {"email": "sarah.johnson@school.com", "password": "teacher123"}
+        )
+        
+        if success and 'id' in response:
+            # Extract token from cookies if available
+            cookies = self.session.cookies.get_dict()
+            if 'access_token' in cookies:
+                self.teacher_token = cookies['access_token']
+            return self.log_test("Teacher Login (Sarah Johnson)", True)
+        else:
+            return self.log_test("Teacher Login (Sarah Johnson)", False, f"Status: {status}, Response: {response}")
+
+    def test_student_login(self):
+        """Test student login with john.smith@school.com"""
+        success, response, status = self.make_request(
+            'POST', 'auth/login',
+            {"email": "john.smith@school.com", "password": "student123"}
+        )
+        
+        if success and 'id' in response:
+            # Extract token from cookies if available
+            cookies = self.session.cookies.get_dict()
+            if 'access_token' in cookies:
+                self.student_token = cookies['access_token']
+            return self.log_test("Student Login (John Smith)", True)
+        else:
+            return self.log_test("Student Login (John Smith)", False, f"Status: {status}, Response: {response}")
+
     def test_admin_stats(self):
         """Test admin dashboard stats"""
         success, response, status = self.make_request(
@@ -83,6 +115,127 @@ class SchoolManagementAPITester:
             return self.log_test("Admin Stats API", True)
         else:
             return self.log_test("Admin Stats API", False, f"Status: {status}")
+
+    def test_teacher_stats(self):
+        """Test teacher dashboard stats"""
+        success, response, status = self.make_request(
+            'GET', 'stats/teacher', auth_token=self.teacher_token
+        )
+        
+        if success and 'total_courses' in response:
+            return self.log_test("Teacher Stats API", True)
+        else:
+            return self.log_test("Teacher Stats API", False, f"Status: {status}")
+
+    def test_student_stats(self):
+        """Test student dashboard stats"""
+        success, response, status = self.make_request(
+            'GET', 'stats/student', auth_token=self.student_token
+        )
+        
+        if success and 'total_courses' in response:
+            return self.log_test("Student Stats API", True)
+        else:
+            return self.log_test("Student Stats API", False, f"Status: {status}")
+
+    def test_teacher_courses(self):
+        """Test teacher courses endpoint"""
+        success, response, status = self.make_request(
+            'GET', 'courses', auth_token=self.teacher_token
+        )
+        
+        if success:
+            return self.log_test("Teacher Courses API", True)
+        else:
+            return self.log_test("Teacher Courses API", False, f"Status: {status}")
+
+    def test_student_courses(self):
+        """Test student courses endpoint"""
+        success, response, status = self.make_request(
+            'GET', 'courses', auth_token=self.student_token
+        )
+        
+        if success:
+            return self.log_test("Student Courses API", True)
+        else:
+            return self.log_test("Student Courses API", False, f"Status: {status}")
+
+    def test_teacher_attendance(self):
+        """Test teacher attendance management"""
+        success, response, status = self.make_request(
+            'GET', 'attendance', auth_token=self.teacher_token
+        )
+        
+        if success:
+            return self.log_test("Teacher Attendance API", True)
+        else:
+            return self.log_test("Teacher Attendance API", False, f"Status: {status}")
+
+    def test_student_attendance(self):
+        """Test student attendance history"""
+        success, response, status = self.make_request(
+            'GET', 'attendance', auth_token=self.student_token
+        )
+        
+        if success:
+            return self.log_test("Student Attendance API", True)
+        else:
+            return self.log_test("Student Attendance API", False, f"Status: {status}")
+
+    def test_teacher_assignments(self):
+        """Test teacher assignments management"""
+        success, response, status = self.make_request(
+            'GET', 'assignments', auth_token=self.teacher_token
+        )
+        
+        if success:
+            return self.log_test("Teacher Assignments API", True)
+        else:
+            return self.log_test("Teacher Assignments API", False, f"Status: {status}")
+
+    def test_student_assignments(self):
+        """Test student assignments view"""
+        success, response, status = self.make_request(
+            'GET', 'assignments', auth_token=self.student_token
+        )
+        
+        if success:
+            return self.log_test("Student Assignments API", True)
+        else:
+            return self.log_test("Student Assignments API", False, f"Status: {status}")
+
+    def test_teacher_progress(self):
+        """Test teacher progress management"""
+        success, response, status = self.make_request(
+            'GET', 'progress', auth_token=self.teacher_token
+        )
+        
+        if success:
+            return self.log_test("Teacher Progress API", True)
+        else:
+            return self.log_test("Teacher Progress API", False, f"Status: {status}")
+
+    def test_student_progress(self):
+        """Test student progress view"""
+        success, response, status = self.make_request(
+            'GET', 'progress', auth_token=self.student_token
+        )
+        
+        if success:
+            return self.log_test("Student Progress API", True)
+        else:
+            return self.log_test("Student Progress API", False, f"Status: {status}")
+
+    def test_student_announcements(self):
+        """Test student announcements view"""
+        success, response, status = self.make_request(
+            'GET', 'announcements', auth_token=self.student_token
+        )
+        
+        if success:
+            return self.log_test("Student Announcements API", True)
+        else:
+            return self.log_test("Student Announcements API", False, f"Status: {status}")
 
     def test_student_registration(self):
         """Test student registration"""
@@ -250,34 +403,57 @@ class SchoolManagementAPITester:
         # Authentication tests
         print("\n📋 Authentication Tests:")
         if not self.test_admin_login():
-            print("❌ Admin login failed - stopping tests")
-            return False
+            print("❌ Admin login failed - stopping admin tests")
+        else:
+            self.test_auth_me_endpoint()
         
-        self.test_auth_me_endpoint()
+        # Teacher authentication and workflow tests
+        print("\n👩‍🏫 Teacher Workflow Tests:")
+        if not self.test_teacher_login():
+            print("❌ Teacher login failed - stopping teacher tests")
+        else:
+            self.test_teacher_stats()
+            self.test_teacher_courses()
+            self.test_teacher_attendance()
+            self.test_teacher_assignments()
+            self.test_teacher_progress()
         
-        # Admin functionality tests
-        print("\n📊 Admin Dashboard Tests:")
-        self.test_admin_stats()
+        # Student authentication and workflow tests
+        print("\n🎓 Student Workflow Tests:")
+        if not self.test_student_login():
+            print("❌ Student login failed - stopping student tests")
+        else:
+            self.test_student_stats()
+            self.test_student_courses()
+            self.test_student_attendance()
+            self.test_student_assignments()
+            self.test_student_progress()
+            self.test_student_announcements()
         
-        # Management endpoints tests
-        print("\n👥 Management Endpoints Tests:")
-        self.test_student_management()
-        self.test_teacher_management()
-        self.test_courses_list()
-        self.test_course_creation()
-        self.test_attendance_endpoints()
-        self.test_assignments_endpoints()
-        self.test_progress_endpoints()
-        self.test_announcements_endpoints()
-        self.test_announcement_creation()
-        
-        # User registration tests
-        print("\n🎓 User Registration Tests:")
-        self.test_student_registration()
-        
-        # Logout test
-        print("\n🚪 Logout Tests:")
-        self.test_logout()
+        # Admin functionality tests (if admin login worked)
+        if self.admin_token:
+            print("\n📊 Admin Dashboard Tests:")
+            self.test_admin_stats()
+            
+            # Management endpoints tests
+            print("\n👥 Management Endpoints Tests:")
+            self.test_student_management()
+            self.test_teacher_management()
+            self.test_courses_list()
+            self.test_course_creation()
+            self.test_attendance_endpoints()
+            self.test_assignments_endpoints()
+            self.test_progress_endpoints()
+            self.test_announcements_endpoints()
+            self.test_announcement_creation()
+            
+            # User registration tests
+            print("\n🎓 User Registration Tests:")
+            self.test_student_registration()
+            
+            # Logout test
+            print("\n🚪 Logout Tests:")
+            self.test_logout()
         
         # Print summary
         print("\n" + "=" * 60)
