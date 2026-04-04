@@ -168,15 +168,6 @@ Password: admin123
 
 ---
 
-- ⚠️ Known Issues / Pending Work
-- 🚧 Phase 2 (In Progress)
-- ❌ Bulk Import (CSV parsing not implemented)
-- ❌ Reports Export (PDF/CSV generation pending)
-
-### 🔧 Backend Missing:
-Setup Wizard import logic
-Reports generation endpoints
-
 ### 📌 Roadmap
 🔜 Upcoming (P1)
 Grading Module
@@ -188,8 +179,6 @@ Timetable / Scheduling System
 - Notification System
 - 🐞 Important Notes
 - ⚠️ Shadcn / Radix UI Bug
-- Do NOT use empty string (value="") in SelectItem
-- Use fallback like: value="all"
 
 ### 🧪 Testing
 Previous iterations tested successfully
