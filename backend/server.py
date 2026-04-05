@@ -4,7 +4,6 @@ load_dotenv()
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, Request, Response, File, UploadFile, Query
 from fastapi.responses import JSONResponse
 from starlette.middleware.cors import CORSMiddleware
-from starlette.middleware.base import BaseHTTPMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import logging
@@ -24,14 +23,9 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(level
 logger = logging.getLogger(__name__)
 
 # Allowed origins for CORS (specific origins, not *)
-ALLOWED_ORIGINS = [
-    "https://github-base-onboard.preview.emergentagent.com",
-    "https://bc462be7-4001-4dfb-8255-ae63d7a0db8d.preview.emergentagent.com",
-    "http://localhost:3000",
-    "http://127.0.0.1:3000"
-]
+ALLOWED_ORIGINS = []
 
-# Add origins from environment if specified
+# Add origins from environment first
 env_origins = os.environ.get('FRONTEND_URL', '')
 if env_origins:
     for origin in env_origins.split(','):
@@ -39,41 +33,14 @@ if env_origins:
         if origin and origin not in ALLOWED_ORIGINS:
             ALLOWED_ORIGINS.append(origin)
 
-# Custom CORS middleware to ensure headers are always set correctly
-# This overrides any proxy-level CORS headers
-class CustomCORSMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next):
-        origin = request.headers.get("origin", "")
-        
-        # Determine the correct origin to use
-        allowed_origin = origin if origin in ALLOWED_ORIGINS else ALLOWED_ORIGINS[0]
-        
-        # Handle preflight requests
-        if request.method == "OPTIONS":
-            response = Response(status_code=200)
-            response.headers["Access-Control-Allow-Origin"] = allowed_origin
-            response.headers["Access-Control-Allow-Credentials"] = "true"
-            response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH, HEAD"
-            response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Requested-With, Accept, Origin, Cookie"
-            response.headers["Access-Control-Max-Age"] = "600"
-            response.headers["Vary"] = "Origin"
-            return response
-        
-        # Process the request
-        response = await call_next(request)
-        
-        # Remove any existing CORS headers that might conflict (from proxy)
-        # Note: We can't remove headers, but we can overwrite them
-        
-        # Set CORS headers on response - these will be the final values
-        response.headers["Access-Control-Allow-Origin"] = allowed_origin
-        response.headers["Access-Control-Allow-Credentials"] = "true"
-        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH, HEAD"
-        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Requested-With, Accept, Origin, Cookie"
-        response.headers["Access-Control-Expose-Headers"] = "Content-Length, Content-Type"
-        response.headers["Vary"] = "Origin"
-        
-        return response
+# Add default origins if none specified
+if not ALLOWED_ORIGINS:
+    ALLOWED_ORIGINS = [
+        "https://github-base-onboard.preview.emergentagent.com",
+        "https://bc462be7-4001-4dfb-8255-ae63d7a0db8d.preview.emergentagent.com",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000"
+    ]
 
 # MongoDB connection
 mongo_url = os.environ['MONGO_URL']
@@ -92,6 +59,44 @@ storage_key = None
 
 # Create the main app
 app = FastAPI(title="School Management System")
+
+# Override CORS headers at response level using middleware
+# This middleware runs LAST (after all other middleware and the proxy)
+@app.middleware("http")
+async def force_cors_headers(request: Request, call_next):
+    origin = request.headers.get("origin", "")
+    
+    # Determine allowed origin
+    if origin in ALLOWED_ORIGINS:
+        allowed_origin = origin
+    elif origin:
+        allowed_origin = ALLOWED_ORIGINS[0] if ALLOWED_ORIGINS else origin
+    else:
+        allowed_origin = ALLOWED_ORIGINS[0] if ALLOWED_ORIGINS else "*"
+    
+    # Handle preflight (OPTIONS) requests
+    if request.method == "OPTIONS":
+        return Response(
+            content="",
+            status_code=200,
+            headers={
+                "Access-Control-Allow-Origin": allowed_origin,
+                "Access-Control-Allow-Credentials": "true",
+                "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS, PATCH, HEAD",
+                "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Requested-With, Accept, Origin, Cookie",
+                "Access-Control-Max-Age": "600",
+                "Vary": "Origin",
+            }
+        )
+    
+    response = await call_next(request)
+    
+    # Force set CORS headers (overwrite any existing)
+    response.headers["Access-Control-Allow-Origin"] = allowed_origin
+    response.headers["Access-Control-Allow-Credentials"] = "true"
+    response.headers["Vary"] = "Origin"
+    
+    return response
 
 # Create a router with the /api prefix
 api_router = APIRouter(prefix="/api")
@@ -349,7 +354,14 @@ async def register(data: UserCreate, response: Response):
     response.set_cookie(key="access_token", value=access_token, httponly=True, secure=True, samesite="none", max_age=3600, path="/")
     response.set_cookie(key="refresh_token", value=refresh_token, httponly=True, secure=True, samesite="none", max_age=604800, path="/")
     
-    return {"id": user_id, "email": email, "name": data.name, "role": data.role}
+    return {
+        "id": user_id, 
+        "email": email, 
+        "name": data.name, 
+        "role": data.role,
+        "access_token": access_token,
+        "refresh_token": refresh_token
+    }
 
 @api_router.post("/auth/login")
 async def login(data: UserLogin, response: Response, request: Request):
@@ -392,7 +404,14 @@ async def login(data: UserLogin, response: Response, request: Request):
     response.set_cookie(key="access_token", value=access_token, httponly=True, secure=True, samesite="none", max_age=3600, path="/")
     response.set_cookie(key="refresh_token", value=refresh_token, httponly=True, secure=True, samesite="none", max_age=604800, path="/")
     
-    return {"id": user_id, "email": user["email"], "name": user["name"], "role": user["role"]}
+    return {
+        "id": user_id, 
+        "email": user["email"], 
+        "name": user["name"], 
+        "role": user["role"],
+        "access_token": access_token,
+        "refresh_token": refresh_token
+    }
 
 @api_router.post("/auth/logout")
 async def logout(response: Response):
@@ -408,7 +427,16 @@ async def get_me(request: Request):
 
 @api_router.post("/auth/refresh")
 async def refresh_token(request: Request, response: Response):
+    # Try to get refresh token from cookie first, then from request body
     refresh = request.cookies.get("refresh_token")
+    
+    if not refresh:
+        try:
+            body = await request.json()
+            refresh = body.get("refresh_token")
+        except:
+            pass
+    
     if not refresh:
         raise HTTPException(status_code=401, detail="No refresh token")
     
@@ -424,7 +452,7 @@ async def refresh_token(request: Request, response: Response):
         access_token = create_access_token(user["user_id"], user["email"], user["role"])
         response.set_cookie(key="access_token", value=access_token, httponly=True, secure=True, samesite="none", max_age=3600, path="/")
         
-        return {"message": "Token refreshed"}
+        return {"message": "Token refreshed", "access_token": access_token}
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail="Invalid refresh token")
 
@@ -501,7 +529,19 @@ async def create_session(request: Request, response: Response):
     response.set_cookie(key="session_token", value=session_token, httponly=True, secure=True, samesite="none", max_age=604800, path="/")
     
     user_data = await db.users.find_one({"user_id": user_id}, {"_id": 0, "password_hash": 0})
-    return user_data
+    
+    # Create JWT tokens for header-based auth
+    access_token = create_access_token(user_id, email, user_data.get("role", "student"))
+    refresh_token = create_refresh_token(user_id)
+    
+    response.set_cookie(key="access_token", value=access_token, httponly=True, secure=True, samesite="none", max_age=3600, path="/")
+    response.set_cookie(key="refresh_token", value=refresh_token, httponly=True, secure=True, samesite="none", max_age=604800, path="/")
+    
+    return {
+        **user_data,
+        "access_token": access_token,
+        "refresh_token": refresh_token
+    }
 
 # ================== ADMIN ENDPOINTS ==================
 
@@ -3401,10 +3441,7 @@ async def get_performance_overview(request: Request):
 # Include the router in the main app
 app.include_router(api_router)
 
-# Add custom CORS middleware (this runs first, before the standard CORSMiddleware)
-app.add_middleware(CustomCORSMiddleware)
-
-# Standard CORS Configuration as backup
+# Standard CORS Configuration as backup (the @app.middleware("http") handles the main CORS logic)
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
