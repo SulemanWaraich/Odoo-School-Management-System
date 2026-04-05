@@ -2095,6 +2095,1256 @@ async def get_student_stats(request: Request):
         "student": student
     }
 
+# ================== GRADING / EXAM MODULE ==================
+
+class ExamCreate(BaseModel):
+    course_id: str
+    title: str
+    exam_type: str = "exam"  # exam, test, quiz, midterm, final
+    date: str
+    max_marks: int = 100
+    description: Optional[str] = None
+
+class ExamResultCreate(BaseModel):
+    exam_id: str
+    student_id: str
+    marks_obtained: float
+    remarks: Optional[str] = None
+
+class GradeCreate(BaseModel):
+    submission_id: str
+    marks_obtained: float
+    feedback: Optional[str] = None
+
+class GradeBulkCreate(BaseModel):
+    assignment_id: str
+    grades: List[dict]  # [{student_id, marks_obtained, feedback}]
+
+# Exams CRUD
+@api_router.get("/exams")
+async def get_exams(request: Request, course_id: Optional[str] = None):
+    user = await get_current_user(request)
+    
+    query = {}
+    if course_id:
+        query["course_id"] = course_id
+    
+    if user["role"] == "teacher":
+        teacher = await db.teachers.find_one({"user_id": user["user_id"]}, {"_id": 0})
+        if teacher:
+            courses = await db.courses.find({"teacher_id": teacher["id"]}, {"_id": 0}).to_list(1000)
+            course_ids = [c["id"] for c in courses]
+            if course_id:
+                if course_id not in course_ids:
+                    raise HTTPException(status_code=403, detail="Not authorized for this course")
+            else:
+                query["course_id"] = {"$in": course_ids}
+    elif user["role"] == "student":
+        student = await db.students.find_one({"user_id": user["user_id"]}, {"_id": 0})
+        if student:
+            enrollments = await db.enrollments.find({"student_id": student["id"]}, {"_id": 0}).to_list(1000)
+            course_ids = [e["course_id"] for e in enrollments]
+            query["course_id"] = {"$in": course_ids}
+    
+    pipeline = [
+        {"$match": query},
+        {"$lookup": {"from": "courses", "localField": "course_id", "foreignField": "id", "as": "course"}},
+        {"$unwind": {"path": "$course", "preserveNullAndEmptyArrays": True}},
+        {"$project": {"_id": 0, "course._id": 0}},
+        {"$sort": {"date": -1}}
+    ]
+    
+    exams = await db.exams.aggregate(pipeline).to_list(1000)
+    return exams
+
+@api_router.post("/exams")
+async def create_exam(data: ExamCreate, request: Request):
+    user = await require_role("admin", "teacher")(request)
+    
+    # Verify teacher owns the course
+    if user["role"] == "teacher":
+        teacher = await db.teachers.find_one({"user_id": user["user_id"]}, {"_id": 0})
+        course = await db.courses.find_one({"id": data.course_id}, {"_id": 0})
+        if not course or course.get("teacher_id") != teacher.get("id"):
+            raise HTTPException(status_code=403, detail="Not authorized for this course")
+    
+    exam_doc = {
+        "id": f"exam_{uuid.uuid4().hex[:8]}",
+        "course_id": data.course_id,
+        "title": data.title,
+        "exam_type": data.exam_type,
+        "date": data.date,
+        "max_marks": data.max_marks,
+        "description": data.description,
+        "created_by": user["user_id"],
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    await db.exams.insert_one(exam_doc)
+    
+    return {"id": exam_doc["id"], "message": "Exam created"}
+
+@api_router.put("/exams/{exam_id}")
+async def update_exam(exam_id: str, request: Request):
+    user = await require_role("admin", "teacher")(request)
+    body = await request.json()
+    
+    exam = await db.exams.find_one({"id": exam_id}, {"_id": 0})
+    if not exam:
+        raise HTTPException(status_code=404, detail="Exam not found")
+    
+    if user["role"] == "teacher":
+        teacher = await db.teachers.find_one({"user_id": user["user_id"]}, {"_id": 0})
+        course = await db.courses.find_one({"id": exam["course_id"]}, {"_id": 0})
+        if not course or course.get("teacher_id") != teacher.get("id"):
+            raise HTTPException(status_code=403, detail="Not authorized")
+    
+    update_data = {k: v for k, v in body.items() if k in ["title", "exam_type", "date", "max_marks", "description"]}
+    if update_data:
+        await db.exams.update_one({"id": exam_id}, {"$set": update_data})
+    
+    return {"message": "Exam updated"}
+
+@api_router.delete("/exams/{exam_id}")
+async def delete_exam(exam_id: str, request: Request):
+    user = await require_role("admin", "teacher")(request)
+    
+    exam = await db.exams.find_one({"id": exam_id}, {"_id": 0})
+    if not exam:
+        raise HTTPException(status_code=404, detail="Exam not found")
+    
+    if user["role"] == "teacher":
+        teacher = await db.teachers.find_one({"user_id": user["user_id"]}, {"_id": 0})
+        course = await db.courses.find_one({"id": exam["course_id"]}, {"_id": 0})
+        if not course or course.get("teacher_id") != teacher.get("id"):
+            raise HTTPException(status_code=403, detail="Not authorized")
+    
+    await db.exams.delete_one({"id": exam_id})
+    await db.exam_results.delete_many({"exam_id": exam_id})
+    
+    return {"message": "Exam deleted"}
+
+# Exam Results
+@api_router.get("/exam-results")
+async def get_exam_results(request: Request, exam_id: Optional[str] = None, student_id: Optional[str] = None):
+    user = await get_current_user(request)
+    
+    query = {}
+    if exam_id:
+        query["exam_id"] = exam_id
+    if student_id:
+        query["student_id"] = student_id
+    
+    # Filter based on role
+    if user["role"] == "student":
+        student = await db.students.find_one({"user_id": user["user_id"]}, {"_id": 0})
+        if student:
+            query["student_id"] = student["id"]
+    elif user["role"] == "teacher":
+        teacher = await db.teachers.find_one({"user_id": user["user_id"]}, {"_id": 0})
+        if teacher:
+            courses = await db.courses.find({"teacher_id": teacher["id"]}, {"_id": 0}).to_list(1000)
+            course_ids = [c["id"] for c in courses]
+            exams = await db.exams.find({"course_id": {"$in": course_ids}}, {"_id": 0}).to_list(1000)
+            exam_ids = [e["id"] for e in exams]
+            if exam_id:
+                if exam_id not in exam_ids:
+                    raise HTTPException(status_code=403, detail="Not authorized")
+            else:
+                query["exam_id"] = {"$in": exam_ids}
+    
+    pipeline = [
+        {"$match": query},
+        {"$lookup": {"from": "exams", "localField": "exam_id", "foreignField": "id", "as": "exam"}},
+        {"$unwind": {"path": "$exam", "preserveNullAndEmptyArrays": True}},
+        {"$lookup": {"from": "students", "localField": "student_id", "foreignField": "id", "as": "student"}},
+        {"$unwind": {"path": "$student", "preserveNullAndEmptyArrays": True}},
+        {"$lookup": {"from": "users", "localField": "student.user_id", "foreignField": "user_id", "as": "student_user"}},
+        {"$unwind": {"path": "$student_user", "preserveNullAndEmptyArrays": True}},
+        {"$project": {"_id": 0, "exam._id": 0, "student._id": 0, "student_user._id": 0, "student_user.password_hash": 0}}
+    ]
+    
+    results = await db.exam_results.aggregate(pipeline).to_list(10000)
+    return results
+
+@api_router.post("/exam-results")
+async def create_exam_result(data: ExamResultCreate, request: Request):
+    user = await require_role("admin", "teacher")(request)
+    
+    exam = await db.exams.find_one({"id": data.exam_id}, {"_id": 0})
+    if not exam:
+        raise HTTPException(status_code=404, detail="Exam not found")
+    
+    if user["role"] == "teacher":
+        teacher = await db.teachers.find_one({"user_id": user["user_id"]}, {"_id": 0})
+        course = await db.courses.find_one({"id": exam["course_id"]}, {"_id": 0})
+        if not course or course.get("teacher_id") != teacher.get("id"):
+            raise HTTPException(status_code=403, detail="Not authorized")
+    
+    # Check if result already exists
+    existing = await db.exam_results.find_one({
+        "exam_id": data.exam_id,
+        "student_id": data.student_id
+    })
+    
+    if existing:
+        await db.exam_results.update_one(
+            {"id": existing["id"]},
+            {"$set": {
+                "marks_obtained": data.marks_obtained,
+                "remarks": data.remarks,
+                "graded_by": user["user_id"],
+                "graded_at": datetime.now(timezone.utc).isoformat()
+            }}
+        )
+        return {"id": existing["id"], "message": "Exam result updated"}
+    
+    result_doc = {
+        "id": f"exr_{uuid.uuid4().hex[:8]}",
+        "exam_id": data.exam_id,
+        "student_id": data.student_id,
+        "marks_obtained": data.marks_obtained,
+        "remarks": data.remarks,
+        "graded_by": user["user_id"],
+        "graded_at": datetime.now(timezone.utc).isoformat()
+    }
+    await db.exam_results.insert_one(result_doc)
+    
+    return {"id": result_doc["id"], "message": "Exam result recorded"}
+
+@api_router.post("/exam-results/bulk")
+async def bulk_create_exam_results(request: Request):
+    user = await require_role("admin", "teacher")(request)
+    body = await request.json()
+    
+    exam_id = body.get("exam_id")
+    results = body.get("results", [])
+    
+    exam = await db.exams.find_one({"id": exam_id}, {"_id": 0})
+    if not exam:
+        raise HTTPException(status_code=404, detail="Exam not found")
+    
+    if user["role"] == "teacher":
+        teacher = await db.teachers.find_one({"user_id": user["user_id"]}, {"_id": 0})
+        course = await db.courses.find_one({"id": exam["course_id"]}, {"_id": 0})
+        if not course or course.get("teacher_id") != teacher.get("id"):
+            raise HTTPException(status_code=403, detail="Not authorized")
+    
+    saved = 0
+    for r in results:
+        existing = await db.exam_results.find_one({
+            "exam_id": exam_id,
+            "student_id": r["student_id"]
+        })
+        
+        if existing:
+            await db.exam_results.update_one(
+                {"id": existing["id"]},
+                {"$set": {
+                    "marks_obtained": r["marks_obtained"],
+                    "remarks": r.get("remarks"),
+                    "graded_by": user["user_id"],
+                    "graded_at": datetime.now(timezone.utc).isoformat()
+                }}
+            )
+        else:
+            await db.exam_results.insert_one({
+                "id": f"exr_{uuid.uuid4().hex[:8]}",
+                "exam_id": exam_id,
+                "student_id": r["student_id"],
+                "marks_obtained": r["marks_obtained"],
+                "remarks": r.get("remarks"),
+                "graded_by": user["user_id"],
+                "graded_at": datetime.now(timezone.utc).isoformat()
+            })
+        saved += 1
+    
+    return {"saved": saved, "message": "Exam results saved"}
+
+# Assignment Grades
+@api_router.get("/grades")
+async def get_grades(request: Request, assignment_id: Optional[str] = None, student_id: Optional[str] = None):
+    user = await get_current_user(request)
+    
+    query = {}
+    if assignment_id:
+        query["assignment_id"] = assignment_id
+    if student_id:
+        query["student_id"] = student_id
+    
+    if user["role"] == "student":
+        student = await db.students.find_one({"user_id": user["user_id"]}, {"_id": 0})
+        if student:
+            query["student_id"] = student["id"]
+    elif user["role"] == "teacher":
+        teacher = await db.teachers.find_one({"user_id": user["user_id"]}, {"_id": 0})
+        if teacher:
+            courses = await db.courses.find({"teacher_id": teacher["id"]}, {"_id": 0}).to_list(1000)
+            course_ids = [c["id"] for c in courses]
+            assignments = await db.assignments.find({"course_id": {"$in": course_ids}}, {"_id": 0}).to_list(1000)
+            assignment_ids = [a["id"] for a in assignments]
+            if assignment_id:
+                if assignment_id not in assignment_ids:
+                    raise HTTPException(status_code=403, detail="Not authorized")
+            else:
+                query["assignment_id"] = {"$in": assignment_ids}
+    
+    pipeline = [
+        {"$match": query},
+        {"$lookup": {"from": "assignments", "localField": "assignment_id", "foreignField": "id", "as": "assignment"}},
+        {"$unwind": {"path": "$assignment", "preserveNullAndEmptyArrays": True}},
+        {"$lookup": {"from": "courses", "localField": "assignment.course_id", "foreignField": "id", "as": "course"}},
+        {"$unwind": {"path": "$course", "preserveNullAndEmptyArrays": True}},
+        {"$lookup": {"from": "students", "localField": "student_id", "foreignField": "id", "as": "student"}},
+        {"$unwind": {"path": "$student", "preserveNullAndEmptyArrays": True}},
+        {"$lookup": {"from": "users", "localField": "student.user_id", "foreignField": "user_id", "as": "student_user"}},
+        {"$unwind": {"path": "$student_user", "preserveNullAndEmptyArrays": True}},
+        {"$project": {"_id": 0, "assignment._id": 0, "course._id": 0, "student._id": 0, "student_user._id": 0, "student_user.password_hash": 0}}
+    ]
+    
+    grades = await db.grades.aggregate(pipeline).to_list(10000)
+    return grades
+
+@api_router.post("/grades")
+async def create_grade(data: GradeCreate, request: Request):
+    user = await require_role("admin", "teacher")(request)
+    
+    submission = await db.submissions.find_one({"id": data.submission_id}, {"_id": 0})
+    if not submission:
+        raise HTTPException(status_code=404, detail="Submission not found")
+    
+    assignment = await db.assignments.find_one({"id": submission["assignment_id"]}, {"_id": 0})
+    if not assignment:
+        raise HTTPException(status_code=404, detail="Assignment not found")
+    
+    if user["role"] == "teacher":
+        teacher = await db.teachers.find_one({"user_id": user["user_id"]}, {"_id": 0})
+        course = await db.courses.find_one({"id": assignment["course_id"]}, {"_id": 0})
+        if not course or course.get("teacher_id") != teacher.get("id"):
+            raise HTTPException(status_code=403, detail="Not authorized")
+    
+    # Check if grade already exists
+    existing = await db.grades.find_one({
+        "submission_id": data.submission_id
+    })
+    
+    if existing:
+        await db.grades.update_one(
+            {"id": existing["id"]},
+            {"$set": {
+                "marks_obtained": data.marks_obtained,
+                "feedback": data.feedback,
+                "graded_by": user["user_id"],
+                "graded_at": datetime.now(timezone.utc).isoformat()
+            }}
+        )
+        # Update submission status
+        await db.submissions.update_one({"id": data.submission_id}, {"$set": {"status": "graded"}})
+        return {"id": existing["id"], "message": "Grade updated"}
+    
+    grade_doc = {
+        "id": f"grd_{uuid.uuid4().hex[:8]}",
+        "submission_id": data.submission_id,
+        "assignment_id": submission["assignment_id"],
+        "student_id": submission["student_id"],
+        "marks_obtained": data.marks_obtained,
+        "max_marks": assignment["max_score"],
+        "feedback": data.feedback,
+        "graded_by": user["user_id"],
+        "graded_at": datetime.now(timezone.utc).isoformat()
+    }
+    await db.grades.insert_one(grade_doc)
+    
+    # Update submission status
+    await db.submissions.update_one({"id": data.submission_id}, {"$set": {"status": "graded"}})
+    
+    return {"id": grade_doc["id"], "message": "Grade recorded"}
+
+@api_router.post("/grades/bulk")
+async def bulk_create_grades(data: GradeBulkCreate, request: Request):
+    user = await require_role("admin", "teacher")(request)
+    
+    assignment = await db.assignments.find_one({"id": data.assignment_id}, {"_id": 0})
+    if not assignment:
+        raise HTTPException(status_code=404, detail="Assignment not found")
+    
+    if user["role"] == "teacher":
+        teacher = await db.teachers.find_one({"user_id": user["user_id"]}, {"_id": 0})
+        course = await db.courses.find_one({"id": assignment["course_id"]}, {"_id": 0})
+        if not course or course.get("teacher_id") != teacher.get("id"):
+            raise HTTPException(status_code=403, detail="Not authorized")
+    
+    saved = 0
+    for g in data.grades:
+        # Find or create the grade record
+        existing = await db.grades.find_one({
+            "assignment_id": data.assignment_id,
+            "student_id": g["student_id"]
+        })
+        
+        if existing:
+            await db.grades.update_one(
+                {"id": existing["id"]},
+                {"$set": {
+                    "marks_obtained": g["marks_obtained"],
+                    "feedback": g.get("feedback"),
+                    "graded_by": user["user_id"],
+                    "graded_at": datetime.now(timezone.utc).isoformat()
+                }}
+            )
+        else:
+            await db.grades.insert_one({
+                "id": f"grd_{uuid.uuid4().hex[:8]}",
+                "assignment_id": data.assignment_id,
+                "student_id": g["student_id"],
+                "marks_obtained": g["marks_obtained"],
+                "max_marks": assignment["max_score"],
+                "feedback": g.get("feedback"),
+                "graded_by": user["user_id"],
+                "graded_at": datetime.now(timezone.utc).isoformat()
+            })
+        saved += 1
+    
+    return {"saved": saved, "message": "Grades saved"}
+
+# Gradebook - Teacher view for course
+@api_router.get("/gradebook/{course_id}")
+async def get_gradebook(course_id: str, request: Request):
+    user = await require_role("admin", "teacher")(request)
+    
+    course = await db.courses.find_one({"id": course_id}, {"_id": 0})
+    if not course:
+        raise HTTPException(status_code=404, detail="Course not found")
+    
+    if user["role"] == "teacher":
+        teacher = await db.teachers.find_one({"user_id": user["user_id"]}, {"_id": 0})
+        if not teacher or course.get("teacher_id") != teacher.get("id"):
+            raise HTTPException(status_code=403, detail="Not authorized")
+    
+    # Get enrolled students
+    enrollments = await db.enrollments.find({"course_id": course_id}, {"_id": 0}).to_list(1000)
+    student_ids = [e["student_id"] for e in enrollments]
+    
+    # Get assignments for this course
+    assignments = await db.assignments.find({"course_id": course_id}, {"_id": 0}).sort("due_date", 1).to_list(100)
+    
+    # Get exams for this course
+    exams = await db.exams.find({"course_id": course_id}, {"_id": 0}).sort("date", 1).to_list(100)
+    
+    # Get all grades and exam results
+    grades = await db.grades.find({"assignment_id": {"$in": [a["id"] for a in assignments]}}, {"_id": 0}).to_list(10000)
+    exam_results = await db.exam_results.find({"exam_id": {"$in": [e["id"] for e in exams]}}, {"_id": 0}).to_list(10000)
+    
+    # Build gradebook for each student
+    students_data = []
+    for sid in student_ids:
+        student = await db.students.find_one({"id": sid}, {"_id": 0})
+        if not student:
+            continue
+        user_data = await db.users.find_one({"user_id": student["user_id"]}, {"_id": 0, "password_hash": 0})
+        
+        # Collect grades for assignments
+        student_grades = [g for g in grades if g["student_id"] == sid]
+        assignment_marks = {}
+        for g in student_grades:
+            assignment_marks[g["assignment_id"]] = {
+                "marks": g["marks_obtained"],
+                "max_marks": g["max_marks"],
+                "feedback": g.get("feedback")
+            }
+        
+        # Collect exam results
+        student_exam_results = [r for r in exam_results if r["student_id"] == sid]
+        exam_marks = {}
+        for r in student_exam_results:
+            exam = next((e for e in exams if e["id"] == r["exam_id"]), None)
+            exam_marks[r["exam_id"]] = {
+                "marks": r["marks_obtained"],
+                "max_marks": exam["max_marks"] if exam else 100,
+                "remarks": r.get("remarks")
+            }
+        
+        # Calculate totals
+        total_obtained = sum(g["marks_obtained"] for g in student_grades) + sum(r["marks_obtained"] for r in student_exam_results)
+        total_max = sum(g["max_marks"] for g in student_grades) + sum((next((e["max_marks"] for e in exams if e["id"] == r["exam_id"]), 100) for r in student_exam_results))
+        percentage = round((total_obtained / total_max * 100) if total_max > 0 else 0, 1)
+        
+        students_data.append({
+            "student_id": sid,
+            "student_code": student["student_id"],
+            "name": user_data["name"] if user_data else "Unknown",
+            "grade": student.get("grade", ""),
+            "assignment_marks": assignment_marks,
+            "exam_marks": exam_marks,
+            "total_obtained": total_obtained,
+            "total_max": total_max,
+            "percentage": percentage
+        })
+    
+    return {
+        "course": course,
+        "assignments": assignments,
+        "exams": exams,
+        "students": students_data
+    }
+
+# Student academic summary
+@api_router.get("/academic-summary")
+async def get_academic_summary(request: Request, student_id: Optional[str] = None):
+    user = await get_current_user(request)
+    
+    target_student_id = student_id
+    
+    if user["role"] == "student":
+        student = await db.students.find_one({"user_id": user["user_id"]}, {"_id": 0})
+        if not student:
+            raise HTTPException(status_code=404, detail="Student not found")
+        target_student_id = student["id"]
+    elif user["role"] == "teacher" and student_id:
+        # Verify student is in teacher's course
+        teacher = await db.teachers.find_one({"user_id": user["user_id"]}, {"_id": 0})
+        if teacher:
+            courses = await db.courses.find({"teacher_id": teacher["id"]}, {"_id": 0}).to_list(1000)
+            course_ids = [c["id"] for c in courses]
+            enrollments = await db.enrollments.find({
+                "course_id": {"$in": course_ids},
+                "student_id": student_id
+            }, {"_id": 0}).to_list(100)
+            if not enrollments:
+                raise HTTPException(status_code=403, detail="Student not in your courses")
+    elif user["role"] not in ["admin"]:
+        if not student_id:
+            raise HTTPException(status_code=400, detail="Student ID required")
+    
+    if not target_student_id:
+        raise HTTPException(status_code=400, detail="Student ID required")
+    
+    student = await db.students.find_one({"id": target_student_id}, {"_id": 0})
+    if not student:
+        raise HTTPException(status_code=404, detail="Student not found")
+    
+    user_data = await db.users.find_one({"user_id": student["user_id"]}, {"_id": 0, "password_hash": 0})
+    
+    # Get enrolled courses
+    enrollments = await db.enrollments.find({"student_id": target_student_id}, {"_id": 0}).to_list(100)
+    course_ids = [e["course_id"] for e in enrollments]
+    
+    courses_summary = []
+    total_obtained = 0
+    total_max = 0
+    
+    for cid in course_ids:
+        course = await db.courses.find_one({"id": cid}, {"_id": 0})
+        if not course:
+            continue
+        
+        # Get teacher info
+        teacher = None
+        teacher_name = "N/A"
+        if course.get("teacher_id"):
+            teacher = await db.teachers.find_one({"id": course["teacher_id"]}, {"_id": 0})
+            if teacher:
+                teacher_user = await db.users.find_one({"user_id": teacher["user_id"]}, {"_id": 0, "password_hash": 0})
+                teacher_name = teacher_user["name"] if teacher_user else "N/A"
+        
+        # Get assignments for this course
+        assignments = await db.assignments.find({"course_id": cid}, {"_id": 0}).to_list(100)
+        assignment_ids = [a["id"] for a in assignments]
+        
+        # Get grades
+        grades = await db.grades.find({
+            "assignment_id": {"$in": assignment_ids},
+            "student_id": target_student_id
+        }, {"_id": 0}).to_list(100)
+        
+        # Get exams
+        exams = await db.exams.find({"course_id": cid}, {"_id": 0}).to_list(100)
+        exam_ids = [e["id"] for e in exams]
+        
+        # Get exam results
+        exam_results = await db.exam_results.find({
+            "exam_id": {"$in": exam_ids},
+            "student_id": target_student_id
+        }, {"_id": 0}).to_list(100)
+        
+        # Calculate course totals
+        assignment_obtained = sum(g["marks_obtained"] for g in grades)
+        assignment_max = sum(g["max_marks"] for g in grades)
+        exam_obtained = sum(r["marks_obtained"] for r in exam_results)
+        exam_max = sum(next((e["max_marks"] for e in exams if e["id"] == r["exam_id"]), 100) for r in exam_results)
+        
+        course_obtained = assignment_obtained + exam_obtained
+        course_max = assignment_max + exam_max
+        course_percentage = round((course_obtained / course_max * 100) if course_max > 0 else 0, 1)
+        
+        total_obtained += course_obtained
+        total_max += course_max
+        
+        # Get attendance
+        attendance = await db.attendance_records.find({
+            "student_id": target_student_id,
+            "course_id": cid
+        }, {"_id": 0}).to_list(1000)
+        total_att = len(attendance)
+        present = len([a for a in attendance if a["status"] == "present"])
+        att_percentage = round((present / total_att * 100) if total_att > 0 else 0, 1)
+        
+        courses_summary.append({
+            "course_id": cid,
+            "course_name": course["name"],
+            "course_code": course["code"],
+            "teacher_name": teacher_name,
+            "assignments_graded": len(grades),
+            "assignments_total": len(assignments),
+            "exams_graded": len(exam_results),
+            "exams_total": len(exams),
+            "marks_obtained": course_obtained,
+            "marks_max": course_max,
+            "percentage": course_percentage,
+            "attendance_percentage": att_percentage,
+            "grade_letter": calculate_grade_letter(course_percentage),
+            "grades": grades,
+            "exam_results": exam_results
+        })
+    
+    overall_percentage = round((total_obtained / total_max * 100) if total_max > 0 else 0, 1)
+    gpa = calculate_gpa(overall_percentage)
+    
+    return {
+        "student": {
+            "id": student["id"],
+            "student_id": student["student_id"],
+            "name": user_data["name"] if user_data else "Unknown",
+            "email": user_data["email"] if user_data else "",
+            "grade": student.get("grade", ""),
+            "section": student.get("section", "")
+        },
+        "courses": courses_summary,
+        "overall": {
+            "total_obtained": total_obtained,
+            "total_max": total_max,
+            "percentage": overall_percentage,
+            "gpa": gpa,
+            "grade_letter": calculate_grade_letter(overall_percentage),
+            "status": "Pass" if overall_percentage >= 40 else "Fail"
+        }
+    }
+
+def calculate_grade_letter(percentage):
+    if percentage >= 90:
+        return "A+"
+    elif percentage >= 80:
+        return "A"
+    elif percentage >= 70:
+        return "B+"
+    elif percentage >= 60:
+        return "B"
+    elif percentage >= 50:
+        return "C"
+    elif percentage >= 40:
+        return "D"
+    else:
+        return "F"
+
+def calculate_gpa(percentage):
+    if percentage >= 90:
+        return 4.0
+    elif percentage >= 80:
+        return 3.7
+    elif percentage >= 70:
+        return 3.3
+    elif percentage >= 60:
+        return 3.0
+    elif percentage >= 50:
+        return 2.5
+    elif percentage >= 40:
+        return 2.0
+    else:
+        return 0.0
+
+# ================== TIMETABLE / SCHEDULING MODULE ==================
+
+class TimetableEntryCreate(BaseModel):
+    course_id: str
+    day_of_week: int  # 0=Monday, 6=Sunday
+    start_time: str  # HH:MM format
+    end_time: str  # HH:MM format
+    room: Optional[str] = None
+    term_id: Optional[str] = None
+
+@api_router.get("/timetable")
+async def get_timetable(
+    request: Request,
+    course_id: Optional[str] = None,
+    teacher_id: Optional[str] = None,
+    day_of_week: Optional[int] = None
+):
+    user = await get_current_user(request)
+    
+    query = {}
+    if course_id:
+        query["course_id"] = course_id
+    if teacher_id:
+        query["teacher_id"] = teacher_id
+    if day_of_week is not None:
+        query["day_of_week"] = day_of_week
+    
+    # Filter based on role
+    if user["role"] == "teacher":
+        teacher = await db.teachers.find_one({"user_id": user["user_id"]}, {"_id": 0})
+        if teacher:
+            query["teacher_id"] = teacher["id"]
+    elif user["role"] == "student":
+        student = await db.students.find_one({"user_id": user["user_id"]}, {"_id": 0})
+        if student:
+            enrollments = await db.enrollments.find({"student_id": student["id"]}, {"_id": 0}).to_list(100)
+            course_ids = [e["course_id"] for e in enrollments]
+            query["course_id"] = {"$in": course_ids}
+    
+    pipeline = [
+        {"$match": query},
+        {"$lookup": {"from": "courses", "localField": "course_id", "foreignField": "id", "as": "course"}},
+        {"$unwind": {"path": "$course", "preserveNullAndEmptyArrays": True}},
+        {"$lookup": {"from": "teachers", "localField": "teacher_id", "foreignField": "id", "as": "teacher"}},
+        {"$unwind": {"path": "$teacher", "preserveNullAndEmptyArrays": True}},
+        {"$lookup": {"from": "users", "localField": "teacher.user_id", "foreignField": "user_id", "as": "teacher_user"}},
+        {"$unwind": {"path": "$teacher_user", "preserveNullAndEmptyArrays": True}},
+        {"$project": {"_id": 0, "course._id": 0, "teacher._id": 0, "teacher_user._id": 0, "teacher_user.password_hash": 0}},
+        {"$sort": {"day_of_week": 1, "start_time": 1}}
+    ]
+    
+    entries = await db.timetable.aggregate(pipeline).to_list(1000)
+    return entries
+
+@api_router.post("/timetable")
+async def create_timetable_entry(data: TimetableEntryCreate, request: Request):
+    user = await require_role("admin")(request)
+    
+    course = await db.courses.find_one({"id": data.course_id}, {"_id": 0})
+    if not course:
+        raise HTTPException(status_code=404, detail="Course not found")
+    
+    teacher_id = course.get("teacher_id")
+    if not teacher_id:
+        raise HTTPException(status_code=400, detail="Course has no assigned teacher")
+    
+    # Check for conflicts
+    conflicts = await check_timetable_conflicts(
+        data.day_of_week,
+        data.start_time,
+        data.end_time,
+        teacher_id=teacher_id,
+        room=data.room
+    )
+    
+    if conflicts:
+        raise HTTPException(status_code=400, detail=f"Schedule conflict detected: {conflicts}")
+    
+    entry_doc = {
+        "id": f"tt_{uuid.uuid4().hex[:8]}",
+        "course_id": data.course_id,
+        "teacher_id": teacher_id,
+        "day_of_week": data.day_of_week,
+        "start_time": data.start_time,
+        "end_time": data.end_time,
+        "room": data.room,
+        "term_id": data.term_id,
+        "created_by": user["user_id"],
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    await db.timetable.insert_one(entry_doc)
+    
+    return {"id": entry_doc["id"], "message": "Timetable entry created"}
+
+@api_router.put("/timetable/{entry_id}")
+async def update_timetable_entry(entry_id: str, request: Request):
+    await require_role("admin")(request)
+    body = await request.json()
+    
+    entry = await db.timetable.find_one({"id": entry_id}, {"_id": 0})
+    if not entry:
+        raise HTTPException(status_code=404, detail="Timetable entry not found")
+    
+    update_data = {}
+    if "day_of_week" in body:
+        update_data["day_of_week"] = body["day_of_week"]
+    if "start_time" in body:
+        update_data["start_time"] = body["start_time"]
+    if "end_time" in body:
+        update_data["end_time"] = body["end_time"]
+    if "room" in body:
+        update_data["room"] = body["room"]
+    
+    # Check for conflicts if time is changing
+    if any(k in update_data for k in ["day_of_week", "start_time", "end_time"]):
+        day = update_data.get("day_of_week", entry["day_of_week"])
+        start = update_data.get("start_time", entry["start_time"])
+        end = update_data.get("end_time", entry["end_time"])
+        room = update_data.get("room", entry.get("room"))
+        
+        conflicts = await check_timetable_conflicts(
+            day, start, end,
+            teacher_id=entry["teacher_id"],
+            room=room,
+            exclude_id=entry_id
+        )
+        
+        if conflicts:
+            raise HTTPException(status_code=400, detail=f"Schedule conflict: {conflicts}")
+    
+    if update_data:
+        await db.timetable.update_one({"id": entry_id}, {"$set": update_data})
+    
+    return {"message": "Timetable entry updated"}
+
+@api_router.delete("/timetable/{entry_id}")
+async def delete_timetable_entry(entry_id: str, request: Request):
+    await require_role("admin")(request)
+    
+    result = await db.timetable.delete_one({"id": entry_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Timetable entry not found")
+    
+    return {"message": "Timetable entry deleted"}
+
+async def check_timetable_conflicts(day_of_week, start_time, end_time, teacher_id=None, room=None, exclude_id=None):
+    conflicts = []
+    
+    query = {
+        "day_of_week": day_of_week,
+        "$or": [
+            {"start_time": {"$lt": end_time}, "end_time": {"$gt": start_time}}
+        ]
+    }
+    
+    if exclude_id:
+        query["id"] = {"$ne": exclude_id}
+    
+    # Check teacher conflicts
+    if teacher_id:
+        teacher_query = {**query, "teacher_id": teacher_id}
+        teacher_conflict = await db.timetable.find_one(teacher_query, {"_id": 0})
+        if teacher_conflict:
+            conflicts.append("Teacher already has a class at this time")
+    
+    # Check room conflicts
+    if room:
+        room_query = {**query, "room": room}
+        room_conflict = await db.timetable.find_one(room_query, {"_id": 0})
+        if room_conflict:
+            conflicts.append(f"Room {room} is already booked at this time")
+    
+    return ", ".join(conflicts) if conflicts else None
+
+@api_router.get("/timetable/conflicts")
+async def get_timetable_conflicts(request: Request):
+    await require_role("admin")(request)
+    
+    entries = await db.timetable.find({}, {"_id": 0}).to_list(10000)
+    conflicts = []
+    
+    for i, e1 in enumerate(entries):
+        for e2 in entries[i+1:]:
+            if e1["day_of_week"] == e2["day_of_week"]:
+                # Check time overlap
+                if e1["start_time"] < e2["end_time"] and e1["end_time"] > e2["start_time"]:
+                    # Teacher conflict
+                    if e1["teacher_id"] == e2["teacher_id"]:
+                        conflicts.append({
+                            "type": "teacher",
+                            "entry1": e1,
+                            "entry2": e2,
+                            "message": "Teacher double-booked"
+                        })
+                    # Room conflict
+                    if e1.get("room") and e1.get("room") == e2.get("room"):
+                        conflicts.append({
+                            "type": "room",
+                            "entry1": e1,
+                            "entry2": e2,
+                            "message": f"Room {e1['room']} double-booked"
+                        })
+    
+    return conflicts
+
+@api_router.get("/timetable/weekly")
+async def get_weekly_timetable(request: Request):
+    user = await get_current_user(request)
+    
+    query = {}
+    
+    if user["role"] == "teacher":
+        teacher = await db.teachers.find_one({"user_id": user["user_id"]}, {"_id": 0})
+        if teacher:
+            query["teacher_id"] = teacher["id"]
+    elif user["role"] == "student":
+        student = await db.students.find_one({"user_id": user["user_id"]}, {"_id": 0})
+        if student:
+            enrollments = await db.enrollments.find({"student_id": student["id"]}, {"_id": 0}).to_list(100)
+            course_ids = [e["course_id"] for e in enrollments]
+            query["course_id"] = {"$in": course_ids}
+    
+    pipeline = [
+        {"$match": query},
+        {"$lookup": {"from": "courses", "localField": "course_id", "foreignField": "id", "as": "course"}},
+        {"$unwind": {"path": "$course", "preserveNullAndEmptyArrays": True}},
+        {"$lookup": {"from": "teachers", "localField": "teacher_id", "foreignField": "id", "as": "teacher"}},
+        {"$unwind": {"path": "$teacher", "preserveNullAndEmptyArrays": True}},
+        {"$lookup": {"from": "users", "localField": "teacher.user_id", "foreignField": "user_id", "as": "teacher_user"}},
+        {"$unwind": {"path": "$teacher_user", "preserveNullAndEmptyArrays": True}},
+        {"$project": {"_id": 0, "course._id": 0, "teacher._id": 0, "teacher_user._id": 0, "teacher_user.password_hash": 0}},
+        {"$sort": {"day_of_week": 1, "start_time": 1}}
+    ]
+    
+    entries = await db.timetable.aggregate(pipeline).to_list(1000)
+    
+    # Organize by day
+    weekly = {i: [] for i in range(7)}  # 0=Monday to 6=Sunday
+    for entry in entries:
+        weekly[entry["day_of_week"]].append(entry)
+    
+    return weekly
+
+# ================== REPORT CARD MODULE ==================
+
+@api_router.get("/report-card/{student_id}")
+async def get_report_card(student_id: str, request: Request, term_id: Optional[str] = None):
+    user = await get_current_user(request)
+    
+    # Authorization
+    if user["role"] == "student":
+        student = await db.students.find_one({"user_id": user["user_id"]}, {"_id": 0})
+        if not student or student["id"] != student_id:
+            raise HTTPException(status_code=403, detail="Access denied")
+    elif user["role"] == "teacher":
+        teacher = await db.teachers.find_one({"user_id": user["user_id"]}, {"_id": 0})
+        if teacher:
+            courses = await db.courses.find({"teacher_id": teacher["id"]}, {"_id": 0}).to_list(1000)
+            course_ids = [c["id"] for c in courses]
+            enrollments = await db.enrollments.find({
+                "course_id": {"$in": course_ids},
+                "student_id": student_id
+            }, {"_id": 0}).to_list(100)
+            if not enrollments:
+                raise HTTPException(status_code=403, detail="Student not in your courses")
+    elif user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    student = await db.students.find_one({"id": student_id}, {"_id": 0})
+    if not student:
+        raise HTTPException(status_code=404, detail="Student not found")
+    
+    user_data = await db.users.find_one({"user_id": student["user_id"]}, {"_id": 0, "password_hash": 0})
+    
+    # Get school profile
+    school = await db.school_profile.find_one({}, {"_id": 0}) or {
+        "name": "SchoolHub Academy",
+        "address": "123 Education Street"
+    }
+    
+    # Get current term or specified term
+    term = None
+    if term_id:
+        term = await db.academic_terms.find_one({"id": term_id}, {"_id": 0})
+    else:
+        term = await db.academic_terms.find_one({"is_current": True}, {"_id": 0})
+    
+    # Get academic summary
+    summary = await get_academic_summary(request, student_id)
+    
+    # Get attendance summary
+    attendance = await db.attendance_records.find({"student_id": student_id}, {"_id": 0}).to_list(10000)
+    total_att = len(attendance)
+    present = len([a for a in attendance if a["status"] == "present"])
+    absent = len([a for a in attendance if a["status"] == "absent"])
+    late = len([a for a in attendance if a["status"] == "late"])
+    excused = len([a for a in attendance if a["status"] == "excused"])
+    
+    # Get weekly progress summary
+    progress = await db.weekly_progress.find({"student_id": student_id}, {"_id": 0}).sort("week_start", -1).to_list(10)
+    progress_scores = [p["performance_score"] for p in progress if p.get("performance_score")]
+    avg_progress = round(sum(progress_scores) / len(progress_scores) if progress_scores else 0, 1)
+    
+    # Calculate class rank (simple implementation)
+    all_students = await db.students.find({}, {"_id": 0}).to_list(1000)
+    student_scores = []
+    for s in all_students:
+        enrollments = await db.enrollments.find({"student_id": s["id"]}, {"_id": 0}).to_list(100)
+        if not enrollments:
+            continue
+        course_ids = [e["course_id"] for e in enrollments]
+        grades = await db.grades.find({"student_id": s["id"]}, {"_id": 0}).to_list(1000)
+        exam_results = await db.exam_results.find({"student_id": s["id"]}, {"_id": 0}).to_list(1000)
+        total = sum(g["marks_obtained"] for g in grades) + sum(r["marks_obtained"] for r in exam_results)
+        student_scores.append({"id": s["id"], "score": total})
+    
+    student_scores.sort(key=lambda x: x["score"], reverse=True)
+    rank = next((i+1 for i, s in enumerate(student_scores) if s["id"] == student_id), None)
+    
+    # Build report card data
+    report_card = {
+        "school": school,
+        "term": term,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "student": {
+            "id": student["id"],
+            "student_id": student["student_id"],
+            "name": user_data["name"] if user_data else "Unknown",
+            "email": user_data["email"] if user_data else "",
+            "grade": student.get("grade", ""),
+            "section": student.get("section", ""),
+            "parent_contact": student.get("parent_contact", "")
+        },
+        "subjects": summary["courses"],
+        "academic_summary": {
+            "total_obtained": summary["overall"]["total_obtained"],
+            "total_max": summary["overall"]["total_max"],
+            "percentage": summary["overall"]["percentage"],
+            "gpa": summary["overall"]["gpa"],
+            "grade_letter": summary["overall"]["grade_letter"],
+            "status": summary["overall"]["status"],
+            "rank": rank,
+            "total_students": len(student_scores)
+        },
+        "attendance_summary": {
+            "total_days": total_att,
+            "present": present,
+            "absent": absent,
+            "late": late,
+            "excused": excused,
+            "percentage": round((present / total_att * 100) if total_att > 0 else 0, 1)
+        },
+        "progress_summary": {
+            "average_score": avg_progress,
+            "recent_progress": progress[:5]
+        },
+        "remarks": generate_remarks(summary["overall"]["percentage"], present / total_att * 100 if total_att > 0 else 100)
+    }
+    
+    return report_card
+
+def generate_remarks(academic_percentage, attendance_percentage):
+    remarks = []
+    
+    if academic_percentage >= 90:
+        remarks.append("Outstanding academic performance!")
+    elif academic_percentage >= 80:
+        remarks.append("Excellent academic achievement.")
+    elif academic_percentage >= 70:
+        remarks.append("Good academic progress.")
+    elif academic_percentage >= 60:
+        remarks.append("Satisfactory academic performance.")
+    elif academic_percentage >= 50:
+        remarks.append("Needs improvement in academics.")
+    else:
+        remarks.append("Requires significant academic improvement.")
+    
+    if attendance_percentage >= 95:
+        remarks.append("Excellent attendance record.")
+    elif attendance_percentage >= 85:
+        remarks.append("Good attendance.")
+    elif attendance_percentage >= 75:
+        remarks.append("Attendance could be improved.")
+    else:
+        remarks.append("Poor attendance - needs immediate attention.")
+    
+    return " ".join(remarks)
+
+@api_router.get("/report-card/{student_id}/pdf")
+async def download_report_card_pdf(student_id: str, request: Request, term_id: Optional[str] = None):
+    # Get report card data first
+    report_card = await get_report_card(student_id, request, term_id)
+    
+    # Generate HTML for PDF
+    html_content = generate_report_card_html(report_card)
+    
+    # For now, return the report card data as JSON
+    # In production, you'd use a library like weasyprint or reportlab to generate PDF
+    return {
+        "message": "PDF generation endpoint - use report card data with a PDF library",
+        "report_card": report_card,
+        "html_template": html_content
+    }
+
+def generate_report_card_html(report_card):
+    subjects_rows = ""
+    for subj in report_card["subjects"]:
+        subjects_rows += f"""
+        <tr>
+            <td>{subj['course_name']}</td>
+            <td>{subj['course_code']}</td>
+            <td>{subj['marks_obtained']}</td>
+            <td>{subj['marks_max']}</td>
+            <td>{subj['percentage']}%</td>
+            <td>{subj['grade_letter']}</td>
+            <td>{subj['attendance_percentage']}%</td>
+        </tr>
+        """
+    
+    html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Report Card - {report_card['student']['name']}</title>
+        <style>
+            body {{ font-family: Arial, sans-serif; margin: 40px; }}
+            .header {{ text-align: center; border-bottom: 2px solid #4F46E5; padding-bottom: 20px; }}
+            .school-name {{ font-size: 24px; font-weight: bold; color: #4F46E5; }}
+            .student-info {{ display: flex; justify-content: space-between; margin: 20px 0; padding: 15px; background: #F8FAFC; }}
+            table {{ width: 100%; border-collapse: collapse; margin: 20px 0; }}
+            th, td {{ border: 1px solid #E2E8F0; padding: 10px; text-align: left; }}
+            th {{ background: #4F46E5; color: white; }}
+            .summary {{ display: flex; justify-content: space-around; margin: 20px 0; }}
+            .summary-box {{ text-align: center; padding: 20px; background: #F8FAFC; border-radius: 8px; min-width: 150px; }}
+            .grade-letter {{ font-size: 36px; font-weight: bold; color: #4F46E5; }}
+            .remarks {{ padding: 15px; background: #FEF3C7; border-left: 4px solid #F59E0B; margin: 20px 0; }}
+            .footer {{ text-align: center; margin-top: 40px; font-size: 12px; color: #64748B; }}
+        </style>
+    </head>
+    <body>
+        <div class="header">
+            <div class="school-name">{report_card['school'].get('name', 'SchoolHub Academy')}</div>
+            <div>{report_card['school'].get('address', '')}</div>
+            <h2>STUDENT REPORT CARD</h2>
+            <div>{report_card['term']['name'] if report_card.get('term') else 'Academic Year 2024-25'}</div>
+        </div>
+        
+        <div class="student-info">
+            <div>
+                <strong>Student Name:</strong> {report_card['student']['name']}<br>
+                <strong>Student ID:</strong> {report_card['student']['student_id']}<br>
+                <strong>Class:</strong> {report_card['student']['grade']} - {report_card['student']['section']}
+            </div>
+            <div>
+                <strong>Email:</strong> {report_card['student']['email']}<br>
+                <strong>Parent Contact:</strong> {report_card['student'].get('parent_contact', 'N/A')}<br>
+                <strong>Report Date:</strong> {report_card['generated_at'][:10]}
+            </div>
+        </div>
+        
+        <h3>Subject-wise Performance</h3>
+        <table>
+            <tr>
+                <th>Subject</th>
+                <th>Code</th>
+                <th>Marks Obtained</th>
+                <th>Max Marks</th>
+                <th>Percentage</th>
+                <th>Grade</th>
+                <th>Attendance</th>
+            </tr>
+            {subjects_rows}
+        </table>
+        
+        <div class="summary">
+            <div class="summary-box">
+                <div>Total Marks</div>
+                <div class="grade-letter">{report_card['academic_summary']['total_obtained']}/{report_card['academic_summary']['total_max']}</div>
+            </div>
+            <div class="summary-box">
+                <div>Percentage</div>
+                <div class="grade-letter">{report_card['academic_summary']['percentage']}%</div>
+            </div>
+            <div class="summary-box">
+                <div>Grade</div>
+                <div class="grade-letter">{report_card['academic_summary']['grade_letter']}</div>
+            </div>
+            <div class="summary-box">
+                <div>GPA</div>
+                <div class="grade-letter">{report_card['academic_summary']['gpa']}</div>
+            </div>
+            <div class="summary-box">
+                <div>Class Rank</div>
+                <div class="grade-letter">{report_card['academic_summary']['rank']}/{report_card['academic_summary']['total_students']}</div>
+            </div>
+        </div>
+        
+        <h3>Attendance Summary</h3>
+        <p>Total Days: {report_card['attendance_summary']['total_days']} | Present: {report_card['attendance_summary']['present']} | Absent: {report_card['attendance_summary']['absent']} | Late: {report_card['attendance_summary']['late']} | Attendance: {report_card['attendance_summary']['percentage']}%</p>
+        
+        <div class="remarks">
+            <strong>Teacher's Remarks:</strong><br>
+            {report_card['remarks']}
+        </div>
+        
+        <p><strong>Result: </strong>{report_card['academic_summary']['status'].upper()}</p>
+        
+        <div class="footer">
+            <p>This is a computer-generated report card.</p>
+            <p>Generated on {report_card['generated_at'][:10]}</p>
+        </div>
+    </body>
+    </html>
+    """
+    return html
+
+# Admin performance overview
+@api_router.get("/performance/overview")
+async def get_performance_overview(request: Request):
+    await require_role("admin")(request)
+    
+    # Get all grades
+    grades = await db.grades.find({}, {"_id": 0}).to_list(100000)
+    exam_results = await db.exam_results.find({}, {"_id": 0}).to_list(100000)
+    
+    # Calculate statistics
+    total_grades = len(grades)
+    total_exam_results = len(exam_results)
+    
+    if grades:
+        avg_assignment_score = round(sum(g["marks_obtained"] / g["max_marks"] * 100 for g in grades) / len(grades), 1)
+    else:
+        avg_assignment_score = 0
+    
+    if exam_results:
+        avg_exam_score = round(sum(r["marks_obtained"] for r in exam_results) / len(exam_results), 1)
+    else:
+        avg_exam_score = 0
+    
+    # Get course-wise performance
+    courses = await db.courses.find({}, {"_id": 0}).to_list(1000)
+    course_performance = []
+    
+    for course in courses:
+        course_assignments = await db.assignments.find({"course_id": course["id"]}, {"_id": 0}).to_list(100)
+        assignment_ids = [a["id"] for a in course_assignments]
+        course_grades = [g for g in grades if g.get("assignment_id") in assignment_ids]
+        
+        course_exams = await db.exams.find({"course_id": course["id"]}, {"_id": 0}).to_list(100)
+        exam_ids = [e["id"] for e in course_exams]
+        course_exam_results = [r for r in exam_results if r.get("exam_id") in exam_ids]
+        
+        if course_grades or course_exam_results:
+            total_marks = sum(g["marks_obtained"] for g in course_grades) + sum(r["marks_obtained"] for r in course_exam_results)
+            max_marks = sum(g["max_marks"] for g in course_grades) + sum(100 for _ in course_exam_results)
+            percentage = round((total_marks / max_marks * 100) if max_marks > 0 else 0, 1)
+        else:
+            percentage = 0
+        
+        course_performance.append({
+            "course_id": course["id"],
+            "course_name": course["name"],
+            "course_code": course["code"],
+            "assignments_graded": len(course_grades),
+            "exams_graded": len(course_exam_results),
+            "average_percentage": percentage
+        })
+    
+    # Get grading completion status
+    all_submissions = await db.submissions.count_documents({})
+    graded_submissions = await db.submissions.count_documents({"status": "graded"})
+    
+    return {
+        "summary": {
+            "total_assignment_grades": total_grades,
+            "total_exam_results": total_exam_results,
+            "avg_assignment_score": avg_assignment_score,
+            "avg_exam_score": avg_exam_score,
+            "grading_completion": round((graded_submissions / all_submissions * 100) if all_submissions > 0 else 0, 1),
+            "pending_grading": all_submissions - graded_submissions
+        },
+        "course_performance": course_performance
+    }
+
 # Include the router in the main app
 app.include_router(api_router)
 
@@ -2129,6 +3379,19 @@ async def startup():
     await db.weekly_progress.create_index([("student_id", 1), ("course_id", 1), ("week_start", 1)])
     await db.login_attempts.create_index("identifier")
     await db.user_sessions.create_index("user_id")
+    
+    # Grading module indexes
+    await db.exams.create_index("id", unique=True)
+    await db.exams.create_index("course_id")
+    await db.exam_results.create_index([("exam_id", 1), ("student_id", 1)], unique=True)
+    await db.grades.create_index([("assignment_id", 1), ("student_id", 1)], unique=True)
+    await db.grades.create_index("submission_id")
+    
+    # Timetable indexes
+    await db.timetable.create_index("id", unique=True)
+    await db.timetable.create_index([("day_of_week", 1), ("start_time", 1)])
+    await db.timetable.create_index("teacher_id")
+    await db.timetable.create_index("course_id")
     
     # Initialize storage
     try:

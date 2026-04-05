@@ -18,16 +18,25 @@ import AnnouncementManagement from './pages/admin/AnnouncementManagement';
 import UserManagement from './pages/admin/UserManagement';
 import SetupWizard from './pages/admin/SetupWizard';
 import Reports from './pages/admin/Reports';
+import GradesManagement from './pages/admin/GradesManagement';
+import TimetableManagement from './pages/admin/TimetableManagement';
+import ReportCards from './pages/admin/ReportCards';
 import TeacherDashboard from './pages/teacher/TeacherDashboard';
 import TeacherCourses from './pages/teacher/TeacherCourses';
 import TeacherAttendance from './pages/teacher/TeacherAttendance';
 import TeacherAssignments from './pages/teacher/TeacherAssignments';
 import TeacherProgress from './pages/teacher/TeacherProgress';
+import TeacherGradebook from './pages/teacher/TeacherGradebook';
+import TeacherTimetable from './pages/teacher/TeacherTimetable';
+import TeacherReportCards from './pages/teacher/TeacherReportCards';
 import StudentDashboard from './pages/student/StudentDashboard';
 import StudentCourses from './pages/student/StudentCourses';
 import StudentAttendance from './pages/student/StudentAttendance';
 import StudentAssignments from './pages/student/StudentAssignments';
 import StudentProgress from './pages/student/StudentProgress';
+import StudentGrades from './pages/student/StudentGrades';
+import StudentTimetable from './pages/student/StudentTimetable';
+import StudentReportCard from './pages/student/StudentReportCard';
 
 const ProtectedRoute = ({ children, allowedRoles }) => {
   const { user, loading } = useAuth();
@@ -132,6 +141,21 @@ const AppRouter = () => {
           <Reports />
         </ProtectedRoute>
       } />
+      <Route path="/admin/grades" element={
+        <ProtectedRoute allowedRoles={['admin']}>
+          <GradesManagement />
+        </ProtectedRoute>
+      } />
+      <Route path="/admin/timetable" element={
+        <ProtectedRoute allowedRoles={['admin']}>
+          <TimetableManagement />
+        </ProtectedRoute>
+      } />
+      <Route path="/admin/report-cards" element={
+        <ProtectedRoute allowedRoles={['admin']}>
+          <ReportCards />
+        </ProtectedRoute>
+      } />
 
       {/* Teacher routes */}
       <Route path="/teacher" element={
@@ -152,6 +176,21 @@ const AppRouter = () => {
       <Route path="/teacher/assignments" element={
         <ProtectedRoute allowedRoles={['teacher']}>
           <TeacherAssignments />
+        </ProtectedRoute>
+      } />
+      <Route path="/teacher/gradebook" element={
+        <ProtectedRoute allowedRoles={['teacher']}>
+          <TeacherGradebook />
+        </ProtectedRoute>
+      } />
+      <Route path="/teacher/timetable" element={
+        <ProtectedRoute allowedRoles={['teacher']}>
+          <TeacherTimetable />
+        </ProtectedRoute>
+      } />
+      <Route path="/teacher/report-cards" element={
+        <ProtectedRoute allowedRoles={['teacher']}>
+          <TeacherReportCards />
         </ProtectedRoute>
       } />
       <Route path="/teacher/progress" element={
@@ -179,6 +218,21 @@ const AppRouter = () => {
       <Route path="/student/assignments" element={
         <ProtectedRoute allowedRoles={['student']}>
           <StudentAssignments />
+        </ProtectedRoute>
+      } />
+      <Route path="/student/grades" element={
+        <ProtectedRoute allowedRoles={['student']}>
+          <StudentGrades />
+        </ProtectedRoute>
+      } />
+      <Route path="/student/timetable" element={
+        <ProtectedRoute allowedRoles={['student']}>
+          <StudentTimetable />
+        </ProtectedRoute>
+      } />
+      <Route path="/student/report-card" element={
+        <ProtectedRoute allowedRoles={['student']}>
+          <StudentReportCard />
         </ProtectedRoute>
       } />
       <Route path="/student/progress" element={

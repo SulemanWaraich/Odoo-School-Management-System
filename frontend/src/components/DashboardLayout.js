@@ -4,7 +4,7 @@ import { useAuth } from '../contexts/AuthContext';
 import {
   LayoutDashboard, Users, GraduationCap, BookOpen, ClipboardCheck,
   FileText, TrendingUp, Megaphone, LogOut, Menu, X, ChevronDown,
-  UserCog, Settings, BarChart3
+  UserCog, Settings, BarChart3, Award, Calendar, FileSpreadsheet
 } from 'lucide-react';
 import { Button } from './ui/button';
 import {
@@ -23,6 +23,9 @@ const adminNavItems = [
   { path: '/admin/courses', label: 'Courses', icon: BookOpen },
   { path: '/admin/attendance', label: 'Attendance', icon: ClipboardCheck },
   { path: '/admin/assignments', label: 'Assignments', icon: FileText },
+  { path: '/admin/grades', label: 'Grades & Exams', icon: Award },
+  { path: '/admin/timetable', label: 'Timetable', icon: Calendar },
+  { path: '/admin/report-cards', label: 'Report Cards', icon: FileSpreadsheet },
   { path: '/admin/progress', label: 'Progress', icon: TrendingUp },
   { path: '/admin/announcements', label: 'Announcements', icon: Megaphone },
   { path: '/admin/reports', label: 'Reports', icon: BarChart3 },
@@ -34,6 +37,9 @@ const teacherNavItems = [
   { path: '/teacher/courses', label: 'My Courses', icon: BookOpen },
   { path: '/teacher/attendance', label: 'Attendance', icon: ClipboardCheck },
   { path: '/teacher/assignments', label: 'Assignments', icon: FileText },
+  { path: '/teacher/gradebook', label: 'Gradebook', icon: Award },
+  { path: '/teacher/timetable', label: 'My Schedule', icon: Calendar },
+  { path: '/teacher/report-cards', label: 'Report Cards', icon: FileSpreadsheet },
   { path: '/teacher/progress', label: 'Progress', icon: TrendingUp },
 ];
 
@@ -42,6 +48,9 @@ const studentNavItems = [
   { path: '/student/courses', label: 'My Courses', icon: BookOpen },
   { path: '/student/attendance', label: 'Attendance', icon: ClipboardCheck },
   { path: '/student/assignments', label: 'Assignments', icon: FileText },
+  { path: '/student/grades', label: 'My Grades', icon: Award },
+  { path: '/student/timetable', label: 'Class Schedule', icon: Calendar },
+  { path: '/student/report-card', label: 'Report Card', icon: FileSpreadsheet },
   { path: '/student/progress', label: 'Progress', icon: TrendingUp },
 ];
 

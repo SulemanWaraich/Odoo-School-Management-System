@@ -6,7 +6,7 @@ import json
 from datetime import datetime, timedelta
 
 class SchoolManagementAPITester:
-    def __init__(self, base_url="https://class-nexus-3.preview.emergentagent.com"):
+    def __init__(self, base_url="https://bc462be7-4001-4dfb-8255-ae63d7a0db8d.preview.emergentagent.com"):
         self.base_url = base_url
         self.session = requests.Session()
         self.session.headers.update({'Content-Type': 'application/json'})
@@ -20,8 +20,16 @@ class SchoolManagementAPITester:
             'teachers': [],
             'courses': [],
             'assignments': [],
-            'enrollments': []
+            'enrollments': [],
+            'exams': [],
+            'exam_results': [],
+            'grades': [],
+            'timetable': []
         }
+        self.test_course_id = None
+        self.test_student_id = None
+        self.test_exam_id = None
+        self.test_assignment_id = None
 
     def log_test(self, name, success, details=""):
         """Log test result"""
@@ -38,8 +46,8 @@ class SchoolManagementAPITester:
         url = f"{self.base_url}/api/{endpoint}"
         headers = {}
         
-        if auth_token:
-            headers['Authorization'] = f'Bearer {auth_token}'
+        # Note: Using session cookies for authentication instead of bearer tokens
+        # The session already has cookies set from login
         
         try:
             if method == 'GET':
@@ -108,7 +116,7 @@ class SchoolManagementAPITester:
     def test_admin_stats(self):
         """Test admin dashboard stats"""
         success, response, status = self.make_request(
-            'GET', 'stats/admin', auth_token=self.admin_token
+            'GET', 'stats/admin'
         )
         
         if success and 'total_students' in response:
@@ -119,7 +127,7 @@ class SchoolManagementAPITester:
     def test_teacher_stats(self):
         """Test teacher dashboard stats"""
         success, response, status = self.make_request(
-            'GET', 'stats/teacher', auth_token=self.teacher_token
+            'GET', 'stats/teacher'
         )
         
         if success and 'total_courses' in response:
@@ -130,7 +138,7 @@ class SchoolManagementAPITester:
     def test_student_stats(self):
         """Test student dashboard stats"""
         success, response, status = self.make_request(
-            'GET', 'stats/student', auth_token=self.student_token
+            'GET', 'stats/student'
         )
         
         if success and 'total_courses' in response:
@@ -141,7 +149,7 @@ class SchoolManagementAPITester:
     def test_teacher_courses(self):
         """Test teacher courses endpoint"""
         success, response, status = self.make_request(
-            'GET', 'courses', auth_token=self.teacher_token
+            'GET', 'courses'
         )
         
         if success:
@@ -152,7 +160,7 @@ class SchoolManagementAPITester:
     def test_student_courses(self):
         """Test student courses endpoint"""
         success, response, status = self.make_request(
-            'GET', 'courses', auth_token=self.student_token
+            'GET', 'courses'
         )
         
         if success:
@@ -163,7 +171,7 @@ class SchoolManagementAPITester:
     def test_teacher_attendance(self):
         """Test teacher attendance management"""
         success, response, status = self.make_request(
-            'GET', 'attendance', auth_token=self.teacher_token
+            'GET', 'attendance'
         )
         
         if success:
@@ -174,7 +182,7 @@ class SchoolManagementAPITester:
     def test_student_attendance(self):
         """Test student attendance history"""
         success, response, status = self.make_request(
-            'GET', 'attendance', auth_token=self.student_token
+            'GET', 'attendance'
         )
         
         if success:
@@ -185,7 +193,7 @@ class SchoolManagementAPITester:
     def test_teacher_assignments(self):
         """Test teacher assignments management"""
         success, response, status = self.make_request(
-            'GET', 'assignments', auth_token=self.teacher_token
+            'GET', 'assignments'
         )
         
         if success:
@@ -196,7 +204,7 @@ class SchoolManagementAPITester:
     def test_student_assignments(self):
         """Test student assignments view"""
         success, response, status = self.make_request(
-            'GET', 'assignments', auth_token=self.student_token
+            'GET', 'assignments'
         )
         
         if success:
@@ -207,7 +215,7 @@ class SchoolManagementAPITester:
     def test_teacher_progress(self):
         """Test teacher progress management"""
         success, response, status = self.make_request(
-            'GET', 'progress', auth_token=self.teacher_token
+            'GET', 'progress'
         )
         
         if success:
@@ -218,7 +226,7 @@ class SchoolManagementAPITester:
     def test_student_progress(self):
         """Test student progress view"""
         success, response, status = self.make_request(
-            'GET', 'progress', auth_token=self.student_token
+            'GET', 'progress'
         )
         
         if success:
@@ -229,7 +237,7 @@ class SchoolManagementAPITester:
     def test_student_announcements(self):
         """Test student announcements view"""
         success, response, status = self.make_request(
-            'GET', 'announcements', auth_token=self.student_token
+            'GET', 'announcements'
         )
         
         if success:
@@ -260,7 +268,7 @@ class SchoolManagementAPITester:
         """Test teacher management endpoints"""
         # Get teachers list
         success, response, status = self.make_request(
-            'GET', 'teachers', auth_token=self.admin_token
+            'GET', 'teachers'
         )
         
         if success:
@@ -272,7 +280,7 @@ class SchoolManagementAPITester:
         """Test student management endpoints"""
         # Get students list
         success, response, status = self.make_request(
-            'GET', 'students', auth_token=self.admin_token
+            'GET', 'students'
         )
         
         if success:
@@ -291,7 +299,7 @@ class SchoolManagementAPITester:
         }
         
         success, response, status = self.make_request(
-            'POST', 'courses', course_data, 200, self.admin_token
+            'POST', 'courses', course_data, 200
         )
         
         if success and 'id' in response:
@@ -303,7 +311,7 @@ class SchoolManagementAPITester:
     def test_courses_list(self):
         """Test getting courses list"""
         success, response, status = self.make_request(
-            'GET', 'courses', auth_token=self.admin_token
+            'GET', 'courses'
         )
         
         if success:
@@ -314,7 +322,7 @@ class SchoolManagementAPITester:
     def test_attendance_endpoints(self):
         """Test attendance management"""
         success, response, status = self.make_request(
-            'GET', 'attendance', auth_token=self.admin_token
+            'GET', 'attendance'
         )
         
         if success:
@@ -325,7 +333,7 @@ class SchoolManagementAPITester:
     def test_assignments_endpoints(self):
         """Test assignment management"""
         success, response, status = self.make_request(
-            'GET', 'assignments', auth_token=self.admin_token
+            'GET', 'assignments'
         )
         
         if success:
@@ -336,7 +344,7 @@ class SchoolManagementAPITester:
     def test_progress_endpoints(self):
         """Test progress tracking"""
         success, response, status = self.make_request(
-            'GET', 'progress', auth_token=self.admin_token
+            'GET', 'progress'
         )
         
         if success:
@@ -348,7 +356,7 @@ class SchoolManagementAPITester:
         """Test announcements management"""
         # Get announcements
         success, response, status = self.make_request(
-            'GET', 'announcements', auth_token=self.admin_token
+            'GET', 'announcements'
         )
         
         if success:
@@ -365,7 +373,7 @@ class SchoolManagementAPITester:
         }
         
         success, response, status = self.make_request(
-            'POST', 'announcements', announcement_data, 200, self.admin_token
+            'POST', 'announcements', announcement_data, 200
         )
         
         if success and 'id' in response:
@@ -376,7 +384,7 @@ class SchoolManagementAPITester:
     def test_auth_me_endpoint(self):
         """Test getting current user info"""
         success, response, status = self.make_request(
-            'GET', 'auth/me', auth_token=self.admin_token
+            'GET', 'auth/me'
         )
         
         if success and 'email' in response:
@@ -387,13 +395,348 @@ class SchoolManagementAPITester:
     def test_logout(self):
         """Test logout functionality"""
         success, response, status = self.make_request(
-            'POST', 'auth/logout', auth_token=self.admin_token
+            'POST', 'auth/logout'
         )
         
         if success:
             return self.log_test("Admin Logout", True)
         else:
             return self.log_test("Admin Logout", False, f"Status: {status}")
+
+    # ============ NEW GRADING/EXAM MODULE TESTS ============
+    
+    def setup_test_data(self):
+        """Setup test data for grading and exam tests"""
+        # Get existing courses and students
+        success, courses_response, _ = self.make_request('GET', 'courses')
+        if success and courses_response:
+            self.test_course_id = courses_response[0]['id'] if courses_response else None
+        
+        success, students_response, _ = self.make_request('GET', 'students')
+        if success and students_response:
+            self.test_student_id = students_response[0]['id'] if students_response else None
+        
+        # Get existing assignments
+        success, assignments_response, _ = self.make_request('GET', 'assignments')
+        if success and assignments_response:
+            self.test_assignment_id = assignments_response[0]['id'] if assignments_response else None
+
+    def test_exams_list(self):
+        """Test GET /api/exams - List all exams"""
+        success, response, status = self.make_request(
+            'GET', 'exams'
+        )
+        
+        if success:
+            return self.log_test("GET /api/exams - List all exams", True)
+        else:
+            return self.log_test("GET /api/exams - List all exams", False, f"Status: {status}")
+
+    def test_exam_creation(self):
+        """Test POST /api/exams - Create exam"""
+        if not self.test_course_id:
+            return self.log_test("POST /api/exams - Create exam", False, "No test course available")
+        
+        exam_data = {
+            "course_id": self.test_course_id,
+            "title": "Test Midterm Exam",
+            "exam_type": "midterm",
+            "date": (datetime.now() + timedelta(days=7)).strftime("%Y-%m-%d"),
+            "max_marks": 100,
+            "description": "Test exam for API testing"
+        }
+        
+        success, response, status = self.make_request(
+            'POST', 'exams', exam_data, 200
+        )
+        
+        if success and 'id' in response:
+            self.test_exam_id = response['id']
+            self.created_resources['exams'].append(response['id'])
+            return self.log_test("POST /api/exams - Create exam", True)
+        else:
+            return self.log_test("POST /api/exams - Create exam", False, f"Status: {status}, Response: {response}")
+
+    def test_exam_update(self):
+        """Test PUT /api/exams/{exam_id} - Update exam"""
+        if not self.test_exam_id:
+            return self.log_test("PUT /api/exams/{exam_id} - Update exam", False, "No test exam available")
+        
+        update_data = {
+            "title": "Updated Test Midterm Exam",
+            "max_marks": 120
+        }
+        
+        success, response, status = self.make_request(
+            'PUT', f'exams/{self.test_exam_id}', update_data, 200
+        )
+        
+        if success:
+            return self.log_test("PUT /api/exams/{exam_id} - Update exam", True)
+        else:
+            return self.log_test("PUT /api/exams/{exam_id} - Update exam", False, f"Status: {status}")
+
+    def test_exam_results_list(self):
+        """Test GET /api/exam-results - Get exam results"""
+        success, response, status = self.make_request(
+            'GET', 'exam-results'
+        )
+        
+        if success:
+            return self.log_test("GET /api/exam-results - Get exam results", True)
+        else:
+            return self.log_test("GET /api/exam-results - Get exam results", False, f"Status: {status}")
+
+    def test_exam_result_creation(self):
+        """Test POST /api/exam-results - Create exam result"""
+        if not self.test_exam_id or not self.test_student_id:
+            return self.log_test("POST /api/exam-results - Create exam result", False, "Missing test data")
+        
+        result_data = {
+            "exam_id": self.test_exam_id,
+            "student_id": self.test_student_id,
+            "marks_obtained": 85.5,
+            "remarks": "Good performance in the test exam"
+        }
+        
+        success, response, status = self.make_request(
+            'POST', 'exam-results', result_data, 200
+        )
+        
+        if success and 'id' in response:
+            self.created_resources['exam_results'].append(response['id'])
+            return self.log_test("POST /api/exam-results - Create exam result", True)
+        else:
+            return self.log_test("POST /api/exam-results - Create exam result", False, f"Status: {status}, Response: {response}")
+
+    def test_exam_results_bulk(self):
+        """Test POST /api/exam-results/bulk - Bulk create exam results"""
+        if not self.test_exam_id or not self.test_student_id:
+            return self.log_test("POST /api/exam-results/bulk - Bulk create exam results", False, "Missing test data")
+        
+        bulk_data = {
+            "exam_id": self.test_exam_id,
+            "results": [
+                {
+                    "student_id": self.test_student_id,
+                    "marks_obtained": 92.0,
+                    "remarks": "Excellent work"
+                }
+            ]
+        }
+        
+        success, response, status = self.make_request(
+            'POST', 'exam-results/bulk', bulk_data, 200
+        )
+        
+        if success:
+            return self.log_test("POST /api/exam-results/bulk - Bulk create exam results", True)
+        else:
+            return self.log_test("POST /api/exam-results/bulk - Bulk create exam results", False, f"Status: {status}")
+
+    def test_grades_list(self):
+        """Test GET /api/grades - Get assignment grades"""
+        success, response, status = self.make_request(
+            'GET', 'grades'
+        )
+        
+        if success:
+            return self.log_test("GET /api/grades - Get assignment grades", True)
+        else:
+            return self.log_test("GET /api/grades - Get assignment grades", False, f"Status: {status}")
+
+    def test_grades_bulk(self):
+        """Test POST /api/grades/bulk - Bulk create grades"""
+        if not self.test_assignment_id or not self.test_student_id:
+            return self.log_test("POST /api/grades/bulk - Bulk create grades", False, "Missing test data")
+        
+        bulk_data = {
+            "assignment_id": self.test_assignment_id,
+            "grades": [
+                {
+                    "student_id": self.test_student_id,
+                    "marks_obtained": 88.0,
+                    "feedback": "Great work on this assignment!"
+                }
+            ]
+        }
+        
+        success, response, status = self.make_request(
+            'POST', 'grades/bulk', bulk_data, 200
+        )
+        
+        if success:
+            return self.log_test("POST /api/grades/bulk - Bulk create grades", True)
+        else:
+            return self.log_test("POST /api/grades/bulk - Bulk create grades", False, f"Status: {status}")
+
+    def test_gradebook(self):
+        """Test GET /api/gradebook/{course_id} - Get gradebook for course"""
+        if not self.test_course_id:
+            return self.log_test("GET /api/gradebook/{course_id} - Get gradebook for course", False, "No test course available")
+        
+        success, response, status = self.make_request(
+            'GET', f'gradebook/{self.test_course_id}'
+        )
+        
+        if success:
+            return self.log_test("GET /api/gradebook/{course_id} - Get gradebook for course", True)
+        else:
+            return self.log_test("GET /api/gradebook/{course_id} - Get gradebook for course", False, f"Status: {status}")
+
+    def test_academic_summary(self):
+        """Test GET /api/academic-summary - Get student academic summary"""
+        success, response, status = self.make_request(
+            'GET', 'academic-summary'
+        )
+        
+        if success:
+            return self.log_test("GET /api/academic-summary - Get student academic summary", True)
+        else:
+            return self.log_test("GET /api/academic-summary - Get student academic summary", False, f"Status: {status}")
+
+    # ============ TIMETABLE MODULE TESTS ============
+
+    def test_timetable_list(self):
+        """Test GET /api/timetable - Get timetable entries"""
+        success, response, status = self.make_request(
+            'GET', 'timetable'
+        )
+        
+        if success:
+            return self.log_test("GET /api/timetable - Get timetable entries", True)
+        else:
+            return self.log_test("GET /api/timetable - Get timetable entries", False, f"Status: {status}")
+
+    def test_timetable_creation(self):
+        """Test POST /api/timetable - Create timetable entry"""
+        if not self.test_course_id:
+            return self.log_test("POST /api/timetable - Create timetable entry", False, "No test course available")
+        
+        timetable_data = {
+            "course_id": self.test_course_id,
+            "day_of_week": 1,  # Tuesday
+            "start_time": "10:00",
+            "end_time": "11:00",
+            "room": "Room 201"
+        }
+        
+        success, response, status = self.make_request(
+            'POST', 'timetable', timetable_data, 200
+        )
+        
+        if success and 'id' in response:
+            self.created_resources['timetable'].append(response['id'])
+            return self.log_test("POST /api/timetable - Create timetable entry", True)
+        else:
+            return self.log_test("POST /api/timetable - Create timetable entry", False, f"Status: {status}, Response: {response}")
+
+    def test_timetable_weekly(self):
+        """Test GET /api/timetable/weekly - Get weekly timetable"""
+        success, response, status = self.make_request(
+            'GET', 'timetable/weekly'
+        )
+        
+        if success:
+            return self.log_test("GET /api/timetable/weekly - Get weekly timetable", True)
+        else:
+            return self.log_test("GET /api/timetable/weekly - Get weekly timetable", False, f"Status: {status}")
+
+    def test_timetable_conflicts(self):
+        """Test GET /api/timetable/conflicts - Check for conflicts"""
+        success, response, status = self.make_request(
+            'GET', 'timetable/conflicts'
+        )
+        
+        if success:
+            return self.log_test("GET /api/timetable/conflicts - Check for conflicts", True)
+        else:
+            return self.log_test("GET /api/timetable/conflicts - Check for conflicts", False, f"Status: {status}")
+
+    def test_performance_overview(self):
+        """Test GET /api/performance/overview - Admin view of all performance"""
+        success, response, status = self.make_request(
+            'GET', 'performance/overview'
+        )
+        
+        if success:
+            return self.log_test("GET /api/performance/overview - Admin view of all performance", True)
+        else:
+            return self.log_test("GET /api/performance/overview - Admin view of all performance", False, f"Status: {status}")
+
+    def test_report_card(self):
+        """Test GET /api/report-card/{student_id} - Generate report card"""
+        if not self.test_student_id:
+            return self.log_test("GET /api/report-card/{student_id} - Generate report card", False, "No test student available")
+        
+        success, response, status = self.make_request(
+            'GET', f'report-card/{self.test_student_id}'
+        )
+        
+        if success:
+            return self.log_test("GET /api/report-card/{student_id} - Generate report card", True)
+        else:
+            return self.log_test("GET /api/report-card/{student_id} - Generate report card", False, f"Status: {status}")
+
+    # ============ ROLE-BASED ACCESS TESTS ============
+
+    def test_teacher_exam_access(self):
+        """Test teacher access to exam APIs"""
+        success, response, status = self.make_request(
+            'GET', 'exams'
+        )
+        
+        if success:
+            return self.log_test("Teacher access to exams API", True)
+        else:
+            return self.log_test("Teacher access to exams API", False, f"Status: {status}")
+
+    def test_student_exam_results_access(self):
+        """Test student access to their exam results"""
+        success, response, status = self.make_request(
+            'GET', 'exam-results'
+        )
+        
+        if success:
+            return self.log_test("Student access to exam results API", True)
+        else:
+            return self.log_test("Student access to exam results API", False, f"Status: {status}")
+
+    def test_student_academic_summary_access(self):
+        """Test student access to their academic summary"""
+        success, response, status = self.make_request(
+            'GET', 'academic-summary'
+        )
+        
+        if success:
+            return self.log_test("Student access to academic summary API", True)
+        else:
+            return self.log_test("Student access to academic summary API", False, f"Status: {status}")
+
+    def test_student_timetable_access(self):
+        """Test student access to timetable"""
+        success, response, status = self.make_request(
+            'GET', 'timetable'
+        )
+        
+        if success:
+            return self.log_test("Student access to timetable API", True)
+        else:
+            return self.log_test("Student access to timetable API", False, f"Status: {status}")
+
+    def test_exam_deletion(self):
+        """Test DELETE /api/exams/{exam_id} - Delete exam"""
+        if not self.test_exam_id:
+            return self.log_test("DELETE /api/exams/{exam_id} - Delete exam", False, "No test exam available")
+        
+        success, response, status = self.make_request(
+            'DELETE', f'exams/{self.test_exam_id}'
+        )
+        
+        if success:
+            return self.log_test("DELETE /api/exams/{exam_id} - Delete exam", True)
+        else:
+            return self.log_test("DELETE /api/exams/{exam_id} - Delete exam", False, f"Status: {status}")
 
     def run_all_tests(self):
         """Run all backend API tests"""
@@ -435,6 +778,10 @@ class SchoolManagementAPITester:
             print("\n📊 Admin Dashboard Tests:")
             self.test_admin_stats()
             
+            # Setup test data for new module tests
+            print("\n🔧 Setting up test data...")
+            self.setup_test_data()
+            
             # Management endpoints tests
             print("\n👥 Management Endpoints Tests:")
             self.test_student_management()
@@ -447,9 +794,47 @@ class SchoolManagementAPITester:
             self.test_announcements_endpoints()
             self.test_announcement_creation()
             
+            # NEW GRADING/EXAM MODULE TESTS
+            print("\n📝 Grading/Exam Module Tests:")
+            self.test_exams_list()
+            self.test_exam_creation()
+            self.test_exam_update()
+            self.test_exam_results_list()
+            self.test_exam_result_creation()
+            self.test_exam_results_bulk()
+            self.test_grades_list()
+            self.test_grades_bulk()
+            self.test_gradebook()
+            self.test_academic_summary()
+            self.test_performance_overview()
+            
+            # NEW TIMETABLE MODULE TESTS
+            print("\n📅 Timetable Module Tests:")
+            self.test_timetable_list()
+            self.test_timetable_creation()
+            self.test_timetable_weekly()
+            self.test_timetable_conflicts()
+            
+            # NEW REPORT CARD MODULE TESTS
+            print("\n📋 Report Card Module Tests:")
+            self.test_report_card()
+            
             # User registration tests
             print("\n🎓 User Registration Tests:")
             self.test_student_registration()
+        
+        # Role-based access tests
+        if self.teacher_token and self.student_token:
+            print("\n🔐 Role-based Access Tests:")
+            self.test_teacher_exam_access()
+            self.test_student_exam_results_access()
+            self.test_student_academic_summary_access()
+            self.test_student_timetable_access()
+        
+        # Cleanup tests
+        if self.admin_token:
+            print("\n🧹 Cleanup Tests:")
+            self.test_exam_deletion()
             
             # Logout test
             print("\n🚪 Logout Tests:")
