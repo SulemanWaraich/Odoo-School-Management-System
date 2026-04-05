@@ -25,9 +25,9 @@ const StudentGrades = () => {
   const fetchData = async () => {
     try {
       const [summaryRes, gradesRes, examRes] = await Promise.all([
-        axios.get(`${API_URL}/api/academic-summary`, { withCredentials: true }),
-        axios.get(`${API_URL}/api/grades`, { withCredentials: true }),
-        axios.get(`${API_URL}/api/exam-results`, { withCredentials: true })
+        axios.get(`${API_URL}/api/academic-summary`),
+        axios.get(`${API_URL}/api/grades`),
+        axios.get(`${API_URL}/api/exam-results`)
       ]);
       setSummary(summaryRes.data);
       setGrades(gradesRes.data);

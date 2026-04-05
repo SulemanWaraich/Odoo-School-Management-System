@@ -26,7 +26,7 @@ const StudentAttendance = () => {
 
   const fetchCourses = async () => {
     try {
-      const response = await axios.get(`${API_URL}/api/courses`, { withCredentials: true });
+      const response = await axios.get(`${API_URL}/api/courses`);
       setCourses(response.data);
     } catch (error) {
       console.error('Error fetching courses:', error);
@@ -37,7 +37,7 @@ const StudentAttendance = () => {
     setLoading(true);
     try {
       const params = selectedCourse ? `?course_id=${selectedCourse}` : '';
-      const response = await axios.get(`${API_URL}/api/attendance${params}`, { withCredentials: true });
+      const response = await axios.get(`${API_URL}/api/attendance${params}`);
       setAttendance(response.data);
     } catch (error) {
       console.error('Error fetching attendance:', error);

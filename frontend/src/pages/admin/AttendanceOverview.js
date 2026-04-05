@@ -35,7 +35,7 @@ const AttendanceOverview = () => {
 
   const fetchCourses = async () => {
     try {
-      const response = await axios.get(`${API_URL}/api/courses`, { withCredentials: true });
+      const response = await axios.get(`${API_URL}/api/courses`);
       setCourses(response.data);
     } catch (error) {
       console.error('Error fetching courses:', error);
@@ -44,7 +44,7 @@ const AttendanceOverview = () => {
 
   const fetchStudents = async () => {
     try {
-      const response = await axios.get(`${API_URL}/api/students`, { withCredentials: true });
+      const response = await axios.get(`${API_URL}/api/students`);
       setStudents(response.data);
     } catch (error) {
       console.error('Error fetching students:', error);
@@ -58,7 +58,7 @@ const AttendanceOverview = () => {
       if (selectedCourse) params.append('course_id', selectedCourse);
       params.append('date', format(selectedDate, 'yyyy-MM-dd'));
       
-      const response = await axios.get(`${API_URL}/api/attendance?${params.toString()}`, { withCredentials: true });
+      const response = await axios.get(`${API_URL}/api/attendance?${params.toString()}`);
       setAttendance(response.data);
     } catch (error) {
       console.error('Error fetching attendance:', error);

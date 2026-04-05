@@ -28,7 +28,7 @@ const AnnouncementManagement = () => {
 
   const fetchAnnouncements = async () => {
     try {
-      const response = await axios.get(`${API_URL}/api/announcements`, { withCredentials: true });
+      const response = await axios.get(`${API_URL}/api/announcements`);
       setAnnouncements(response.data);
     } catch (error) {
       console.error('Error fetching announcements:', error);
@@ -39,7 +39,7 @@ const AnnouncementManagement = () => {
 
   const fetchCourses = async () => {
     try {
-      const response = await axios.get(`${API_URL}/api/courses`, { withCredentials: true });
+      const response = await axios.get(`${API_URL}/api/courses`);
       setCourses(response.data);
     } catch (error) {
       console.error('Error fetching courses:', error);
@@ -56,7 +56,7 @@ const AnnouncementManagement = () => {
       await axios.post(`${API_URL}/api/announcements`, {
         ...form,
         course_id: form.course_id || null
-      }, { withCredentials: true });
+      });
       toast.success('Announcement created successfully');
       setDialogOpen(false);
       setForm({ title: '', content: '', target_role: 'all', course_id: '' });
@@ -70,7 +70,7 @@ const AnnouncementManagement = () => {
     if (!window.confirm('Are you sure you want to delete this announcement?')) return;
 
     try {
-      await axios.delete(`${API_URL}/api/announcements/${announcementId}`, { withCredentials: true });
+      await axios.delete(`${API_URL}/api/announcements/${announcementId}`);
       toast.success('Announcement deleted');
       fetchAnnouncements();
     } catch (error) {

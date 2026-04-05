@@ -64,7 +64,7 @@ const Reports = () => {
 
   const fetchCourses = async () => {
     try {
-      const response = await axios.get(`${API_URL}/api/courses`, { withCredentials: true });
+      const response = await axios.get(`${API_URL}/api/courses`);
       setCourses(response.data);
     } catch (error) {
       console.error('Error fetching courses:', error);
@@ -73,7 +73,7 @@ const Reports = () => {
 
   const fetchStudents = async () => {
     try {
-      const response = await axios.get(`${API_URL}/api/students`, { withCredentials: true });
+      const response = await axios.get(`${API_URL}/api/students`);
       setStudents(response.data);
     } catch (error) {
       console.error('Error fetching students:', error);
@@ -88,7 +88,7 @@ const Reports = () => {
       params.append('start_date', format(startDate, 'yyyy-MM-dd'));
       params.append('end_date', format(endDate, 'yyyy-MM-dd'));
       
-      const response = await axios.get(`${API_URL}/api/reports/attendance?${params.toString()}`, { withCredentials: true });
+      const response = await axios.get(`${API_URL}/api/reports/attendance?${params.toString()}`);
       setAttendanceReport(response.data);
     } catch (error) {
       console.error('Error fetching attendance report:', error);
@@ -101,7 +101,7 @@ const Reports = () => {
     setLoading(true);
     try {
       const params = selectedCourse ? `?course_id=${selectedCourse}` : '';
-      const response = await axios.get(`${API_URL}/api/reports/assignments${params}`, { withCredentials: true });
+      const response = await axios.get(`${API_URL}/api/reports/assignments${params}`);
       setAssignmentReport(response.data);
     } catch (error) {
       console.error('Error fetching assignment report:', error);
@@ -114,7 +114,7 @@ const Reports = () => {
     setLoading(true);
     try {
       const params = selectedCourse ? `?course_id=${selectedCourse}` : '';
-      const response = await axios.get(`${API_URL}/api/reports/progress${params}`, { withCredentials: true });
+      const response = await axios.get(`${API_URL}/api/reports/progress${params}`);
       setProgressReport(response.data);
     } catch (error) {
       console.error('Error fetching progress report:', error);
@@ -126,7 +126,7 @@ const Reports = () => {
   const fetchClassSummary = async () => {
     setLoading(true);
     try {
-      const response = await axios.get(`${API_URL}/api/reports/class-summary?course_id=${selectedCourse}`, { withCredentials: true });
+      const response = await axios.get(`${API_URL}/api/reports/class-summary?course_id=${selectedCourse}`);
       setClassSummary(response.data);
     } catch (error) {
       console.error('Error fetching class summary:', error);
@@ -138,7 +138,7 @@ const Reports = () => {
   const fetchStudentPerformance = async () => {
     setLoading(true);
     try {
-      const response = await axios.get(`${API_URL}/api/reports/student-performance/${selectedStudent}`, { withCredentials: true });
+      const response = await axios.get(`${API_URL}/api/reports/student-performance/${selectedStudent}`);
       setStudentPerformance(response.data);
     } catch (error) {
       console.error('Error fetching student performance:', error);
@@ -151,7 +151,6 @@ const Reports = () => {
     try {
       const params = selectedCourse ? `?course_id=${selectedCourse}&format=csv` : '?format=csv';
       const response = await axios.get(`${API_URL}/api/reports/export/${reportType}${params}`, { 
-        withCredentials: true,
         responseType: 'blob'
       });
       

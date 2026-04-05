@@ -23,8 +23,8 @@ const StudentReportCard = () => {
   const fetchStudentInfo = async () => {
     try {
       // First get student info
-      const meRes = await axios.get(`${API_URL}/api/auth/me`, { withCredentials: true });
-      const statsRes = await axios.get(`${API_URL}/api/stats/student`, { withCredentials: true });
+      const meRes = await axios.get(`${API_URL}/api/auth/me`);
+      const statsRes = await axios.get(`${API_URL}/api/stats/student`);
       setStudentId(statsRes.data.student?.id);
       
       if (statsRes.data.student?.id) {
@@ -39,7 +39,7 @@ const StudentReportCard = () => {
 
   const fetchReportCard = async (sid) => {
     try {
-      const response = await axios.get(`${API_URL}/api/report-card/${sid}`, { withCredentials: true });
+      const response = await axios.get(`${API_URL}/api/report-card/${sid}`);
       setReportCard(response.data);
     } catch (error) {
       console.error('Error fetching report card:', error);

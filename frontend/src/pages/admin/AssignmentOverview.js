@@ -25,7 +25,7 @@ const AssignmentOverview = () => {
 
   const fetchAssignments = async () => {
     try {
-      const response = await axios.get(`${API_URL}/api/assignments`, { withCredentials: true });
+      const response = await axios.get(`${API_URL}/api/assignments`);
       setAssignments(response.data);
     } catch (error) {
       console.error('Error fetching assignments:', error);
@@ -36,7 +36,7 @@ const AssignmentOverview = () => {
 
   const fetchCourses = async () => {
     try {
-      const response = await axios.get(`${API_URL}/api/courses`, { withCredentials: true });
+      const response = await axios.get(`${API_URL}/api/courses`);
       setCourses(response.data);
     } catch (error) {
       console.error('Error fetching courses:', error);

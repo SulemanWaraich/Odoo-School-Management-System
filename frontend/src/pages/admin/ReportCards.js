@@ -38,8 +38,8 @@ const ReportCards = () => {
   const fetchData = async () => {
     try {
       const [studentsRes, termsRes] = await Promise.all([
-        axios.get(`${API_URL}/api/students`, { withCredentials: true }),
-        axios.get(`${API_URL}/api/academic-terms`, { withCredentials: true })
+        axios.get(`${API_URL}/api/students`),
+        axios.get(`${API_URL}/api/academic-terms`)
       ]);
       setStudents(studentsRes.data);
       setFilteredStudents(studentsRes.data);
@@ -72,7 +72,7 @@ const ReportCards = () => {
       const url = selectedTerm 
         ? `${API_URL}/api/report-card/${studentId}?term_id=${selectedTerm}`
         : `${API_URL}/api/report-card/${studentId}`;
-      const response = await axios.get(url, { withCredentials: true });
+      const response = await axios.get(url);
       setReportCard(response.data);
       setPreviewOpen(true);
     } catch (error) {

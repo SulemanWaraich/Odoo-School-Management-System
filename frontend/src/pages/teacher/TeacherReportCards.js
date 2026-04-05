@@ -36,14 +36,14 @@ const TeacherReportCards = () => {
   const fetchData = async () => {
     try {
       const [coursesRes, studentsRes] = await Promise.all([
-        axios.get(`${API_URL}/api/courses`, { withCredentials: true }),
-        axios.get(`${API_URL}/api/students`, { withCredentials: true })
+        axios.get(`${API_URL}/api/courses`),
+        axios.get(`${API_URL}/api/students`)
       ]);
       setCourses(coursesRes.data);
       
       // Get students from all courses this teacher teaches
       const courseIds = coursesRes.data.map(c => c.id);
-      const enrollmentsRes = await axios.get(`${API_URL}/api/enrollments`, { withCredentials: true });
+      const enrollmentsRes = await axios.get(`${API_URL}/api/enrollments`);
       const enrolledStudentIds = new Set(
         enrollmentsRes.data
           .filter(e => courseIds.includes(e.course_id))
@@ -66,7 +66,7 @@ const TeacherReportCards = () => {
     
     if (selectedCourse !== 'all') {
       try {
-        const enrollmentsRes = await axios.get(`${API_URL}/api/enrollments?course_id=${selectedCourse}`, { withCredentials: true });
+        const enrollmentsRes = await axios.get(`${API_URL}/api/enrollments?course_id=${selectedCourse}`);
         const enrolledIds = enrollmentsRes.data.map(e => e.student_id);
         filtered = students.filter(s => enrolledIds.includes(s.id));
       } catch (error) {
@@ -87,7 +87,7 @@ const TeacherReportCards = () => {
   const fetchReportCard = async (studentId) => {
     try {
       setLoading(true);
-      const response = await axios.get(`${API_URL}/api/report-card/${studentId}`, { withCredentials: true });
+      const response = await axios.get(`${API_URL}/api/report-card/${studentId}`);
       setReportCard(response.data);
       setPreviewOpen(true);
     } catch (error) {

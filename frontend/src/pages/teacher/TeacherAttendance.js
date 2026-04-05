@@ -36,7 +36,7 @@ const TeacherAttendance = () => {
 
   const fetchCourses = async () => {
     try {
-      const response = await axios.get(`${API_URL}/api/courses`, { withCredentials: true });
+      const response = await axios.get(`${API_URL}/api/courses`);
       setCourses(response.data);
       if (response.data.length > 0) {
         setSelectedCourse(response.data[0].id);
@@ -50,10 +50,10 @@ const TeacherAttendance = () => {
 
   const fetchEnrolledStudents = async () => {
     try {
-      const enrollResponse = await axios.get(`${API_URL}/api/enrollments?course_id=${selectedCourse}`, { withCredentials: true });
+      const enrollResponse = await axios.get(`${API_URL}/api/enrollments?course_id=${selectedCourse}`);
       const studentIds = enrollResponse.data.map(e => e.student_id);
       
-      const studentsResponse = await axios.get(`${API_URL}/api/students`, { withCredentials: true });
+      const studentsResponse = await axios.get(`${API_URL}/api/students`);
       const enrolledStudents = studentsResponse.data.filter(s => studentIds.includes(s.id));
       setStudents(enrolledStudents);
     } catch (error) {
@@ -64,7 +64,7 @@ const TeacherAttendance = () => {
   const fetchExistingAttendance = async () => {
     try {
       const dateStr = format(selectedDate, 'yyyy-MM-dd');
-      const response = await axios.get(`${API_URL}/api/attendance?course_id=${selectedCourse}&date=${dateStr}`, { withCredentials: true });
+      const response = await axios.get(`${API_URL}/api/attendance?course_id=${selectedCourse}&date=${dateStr}`);
       setExistingAttendance(response.data);
       
       // Pre-fill attendance
@@ -102,7 +102,7 @@ const TeacherAttendance = () => {
         course_id: selectedCourse,
         date: format(selectedDate, 'yyyy-MM-dd'),
         records: records
-      }, { withCredentials: true });
+      });
       toast.success('Attendance saved successfully');
     } catch (error) {
       toast.error('Failed to save attendance');

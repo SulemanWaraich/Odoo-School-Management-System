@@ -25,7 +25,7 @@ const ProgressOverview = () => {
     setLoading(true);
     try {
       const params = selectedCourse ? `?course_id=${selectedCourse}` : '';
-      const response = await axios.get(`${API_URL}/api/progress${params}`, { withCredentials: true });
+      const response = await axios.get(`${API_URL}/api/progress${params}`);
       setProgress(response.data);
     } catch (error) {
       console.error('Error fetching progress:', error);
@@ -36,7 +36,7 @@ const ProgressOverview = () => {
 
   const fetchCourses = async () => {
     try {
-      const response = await axios.get(`${API_URL}/api/courses`, { withCredentials: true });
+      const response = await axios.get(`${API_URL}/api/courses`);
       setCourses(response.data);
     } catch (error) {
       console.error('Error fetching courses:', error);

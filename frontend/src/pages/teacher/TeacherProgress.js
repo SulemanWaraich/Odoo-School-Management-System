@@ -43,7 +43,7 @@ const TeacherProgress = () => {
 
   const fetchCourses = async () => {
     try {
-      const response = await axios.get(`${API_URL}/api/courses`, { withCredentials: true });
+      const response = await axios.get(`${API_URL}/api/courses`);
       setCourses(response.data);
       if (response.data.length > 0) {
         setSelectedCourse(response.data[0].id);
@@ -57,7 +57,7 @@ const TeacherProgress = () => {
 
   const fetchProgress = async () => {
     try {
-      const response = await axios.get(`${API_URL}/api/progress?course_id=${selectedCourse}`, { withCredentials: true });
+      const response = await axios.get(`${API_URL}/api/progress?course_id=${selectedCourse}`);
       setProgress(response.data);
     } catch (error) {
       console.error('Error fetching progress:', error);
@@ -66,10 +66,10 @@ const TeacherProgress = () => {
 
   const fetchEnrolledStudents = async () => {
     try {
-      const enrollResponse = await axios.get(`${API_URL}/api/enrollments?course_id=${selectedCourse}`, { withCredentials: true });
+      const enrollResponse = await axios.get(`${API_URL}/api/enrollments?course_id=${selectedCourse}`);
       const studentIds = enrollResponse.data.map(e => e.student_id);
       
-      const studentsResponse = await axios.get(`${API_URL}/api/students`, { withCredentials: true });
+      const studentsResponse = await axios.get(`${API_URL}/api/students`);
       const enrolledStudents = studentsResponse.data.filter(s => studentIds.includes(s.id));
       setStudents(enrolledStudents);
     } catch (error) {
@@ -88,7 +88,7 @@ const TeacherProgress = () => {
         ...form,
         course_id: selectedCourse,
         performance_score: form.performance_score ? parseInt(form.performance_score) : null
-      }, { withCredentials: true });
+      });
       toast.success('Progress recorded successfully');
       setDialogOpen(false);
       resetForm();

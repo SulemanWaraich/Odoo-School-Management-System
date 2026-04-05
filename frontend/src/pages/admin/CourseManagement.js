@@ -30,7 +30,7 @@ const CourseManagement = () => {
 
   const fetchCourses = async () => {
     try {
-      const response = await axios.get(`${API_URL}/api/courses`, { withCredentials: true });
+      const response = await axios.get(`${API_URL}/api/courses`);
       setCourses(response.data);
     } catch (error) {
       console.error('Error fetching courses:', error);
@@ -42,7 +42,7 @@ const CourseManagement = () => {
 
   const fetchTeachers = async () => {
     try {
-      const response = await axios.get(`${API_URL}/api/teachers`, { withCredentials: true });
+      const response = await axios.get(`${API_URL}/api/teachers`);
       setTeachers(response.data);
     } catch (error) {
       console.error('Error fetching teachers:', error);
@@ -57,10 +57,10 @@ const CourseManagement = () => {
 
     try {
       if (editCourse) {
-        await axios.put(`${API_URL}/api/courses/${editCourse.id}`, form, { withCredentials: true });
+        await axios.put(`${API_URL}/api/courses/${editCourse.id}`, form);
         toast.success('Course updated successfully');
       } else {
-        await axios.post(`${API_URL}/api/courses`, form, { withCredentials: true });
+        await axios.post(`${API_URL}/api/courses`, form);
         toast.success('Course created successfully');
       }
       setDialogOpen(false);
@@ -76,7 +76,7 @@ const CourseManagement = () => {
     if (!window.confirm('Are you sure you want to delete this course?')) return;
     
     try {
-      await axios.delete(`${API_URL}/api/courses/${courseId}`, { withCredentials: true });
+      await axios.delete(`${API_URL}/api/courses/${courseId}`);
       toast.success('Course deleted successfully');
       fetchCourses();
     } catch (error) {

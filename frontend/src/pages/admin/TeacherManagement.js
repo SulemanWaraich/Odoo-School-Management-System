@@ -25,7 +25,7 @@ const TeacherManagement = () => {
 
   const fetchTeachers = async () => {
     try {
-      const response = await axios.get(`${API_URL}/api/teachers`, { withCredentials: true });
+      const response = await axios.get(`${API_URL}/api/teachers`);
       setTeachers(response.data);
     } catch (error) {
       console.error('Error fetching teachers:', error);
@@ -37,7 +37,7 @@ const TeacherManagement = () => {
 
   const handleEditTeacher = async () => {
     try {
-      await axios.put(`${API_URL}/api/teachers/${editTeacher.id}`, editForm, { withCredentials: true });
+      await axios.put(`${API_URL}/api/teachers/${editTeacher.id}`, editForm);
       toast.success('Teacher updated successfully');
       setEditTeacher(null);
       fetchTeachers();
@@ -50,7 +50,7 @@ const TeacherManagement = () => {
     if (!window.confirm('Are you sure you want to delete this teacher?')) return;
     
     try {
-      await axios.delete(`${API_URL}/api/teachers/${teacherId}`, { withCredentials: true });
+      await axios.delete(`${API_URL}/api/teachers/${teacherId}`);
       toast.success('Teacher deleted successfully');
       fetchTeachers();
     } catch (error) {

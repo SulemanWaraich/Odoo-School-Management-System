@@ -40,9 +40,9 @@ const TimetableManagement = () => {
   const fetchData = async () => {
     try {
       const [entriesRes, coursesRes, conflictsRes] = await Promise.all([
-        axios.get(`${API_URL}/api/timetable`, { withCredentials: true }),
-        axios.get(`${API_URL}/api/courses`, { withCredentials: true }),
-        axios.get(`${API_URL}/api/timetable/conflicts`, { withCredentials: true })
+        axios.get(`${API_URL}/api/timetable`),
+        axios.get(`${API_URL}/api/courses`),
+        axios.get(`${API_URL}/api/timetable/conflicts`)
       ]);
       setEntries(entriesRes.data);
       setCourses(coursesRes.data);
@@ -62,10 +62,10 @@ const TimetableManagement = () => {
     }
     try {
       if (editEntry) {
-        await axios.put(`${API_URL}/api/timetable/${editEntry.id}`, form, { withCredentials: true });
+        await axios.put(`${API_URL}/api/timetable/${editEntry.id}`, form);
         toast.success('Entry updated');
       } else {
-        await axios.post(`${API_URL}/api/timetable`, form, { withCredentials: true });
+        await axios.post(`${API_URL}/api/timetable`, form);
         toast.success('Entry created');
       }
       setDialogOpen(false);
@@ -80,7 +80,7 @@ const TimetableManagement = () => {
   const handleDelete = async (entryId) => {
     if (!window.confirm('Delete this timetable entry?')) return;
     try {
-      await axios.delete(`${API_URL}/api/timetable/${entryId}`, { withCredentials: true });
+      await axios.delete(`${API_URL}/api/timetable/${entryId}`);
       toast.success('Entry deleted');
       fetchData();
     } catch (error) {

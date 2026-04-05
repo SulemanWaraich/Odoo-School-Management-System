@@ -42,7 +42,7 @@ const TeacherAssignments = () => {
 
   const fetchCourses = async () => {
     try {
-      const response = await axios.get(`${API_URL}/api/courses`, { withCredentials: true });
+      const response = await axios.get(`${API_URL}/api/courses`);
       setCourses(response.data);
     } catch (error) {
       console.error('Error fetching courses:', error);
@@ -51,7 +51,7 @@ const TeacherAssignments = () => {
 
   const fetchAssignments = async () => {
     try {
-      const response = await axios.get(`${API_URL}/api/assignments`, { withCredentials: true });
+      const response = await axios.get(`${API_URL}/api/assignments`);
       setAssignments(response.data);
     } catch (error) {
       console.error('Error fetching assignments:', error);
@@ -62,7 +62,7 @@ const TeacherAssignments = () => {
 
   const fetchSubmissions = async (assignmentId) => {
     try {
-      const response = await axios.get(`${API_URL}/api/submissions?assignment_id=${assignmentId}`, { withCredentials: true });
+      const response = await axios.get(`${API_URL}/api/submissions?assignment_id=${assignmentId}`);
       setSubmissions(response.data);
     } catch (error) {
       console.error('Error fetching submissions:', error);
@@ -82,10 +82,10 @@ const TeacherAssignments = () => {
       };
 
       if (editAssignment) {
-        await axios.put(`${API_URL}/api/assignments/${editAssignment.id}`, payload, { withCredentials: true });
+        await axios.put(`${API_URL}/api/assignments/${editAssignment.id}`, payload);
         toast.success('Assignment updated successfully');
       } else {
-        await axios.post(`${API_URL}/api/assignments`, payload, { withCredentials: true });
+        await axios.post(`${API_URL}/api/assignments`, payload);
         toast.success('Assignment created successfully');
       }
       setDialogOpen(false);
@@ -101,7 +101,7 @@ const TeacherAssignments = () => {
     if (!window.confirm('Are you sure you want to delete this assignment?')) return;
 
     try {
-      await axios.delete(`${API_URL}/api/assignments/${assignmentId}`, { withCredentials: true });
+      await axios.delete(`${API_URL}/api/assignments/${assignmentId}`);
       toast.success('Assignment deleted');
       fetchAssignments();
     } catch (error) {

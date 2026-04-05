@@ -31,7 +31,7 @@ const StudentManagement = () => {
 
   const fetchStudents = async () => {
     try {
-      const response = await axios.get(`${API_URL}/api/students`, { withCredentials: true });
+      const response = await axios.get(`${API_URL}/api/students`);
       setStudents(response.data);
     } catch (error) {
       console.error('Error fetching students:', error);
@@ -43,7 +43,7 @@ const StudentManagement = () => {
 
   const fetchCourses = async () => {
     try {
-      const response = await axios.get(`${API_URL}/api/courses`, { withCredentials: true });
+      const response = await axios.get(`${API_URL}/api/courses`);
       setCourses(response.data);
     } catch (error) {
       console.error('Error fetching courses:', error);
@@ -52,7 +52,7 @@ const StudentManagement = () => {
 
   const handleEditStudent = async () => {
     try {
-      await axios.put(`${API_URL}/api/students/${editStudent.id}`, editForm, { withCredentials: true });
+      await axios.put(`${API_URL}/api/students/${editStudent.id}`, editForm);
       toast.success('Student updated successfully');
       setEditStudent(null);
       fetchStudents();
@@ -65,7 +65,7 @@ const StudentManagement = () => {
     if (!window.confirm('Are you sure you want to delete this student?')) return;
     
     try {
-      await axios.delete(`${API_URL}/api/students/${studentId}`, { withCredentials: true });
+      await axios.delete(`${API_URL}/api/students/${studentId}`);
       toast.success('Student deleted successfully');
       fetchStudents();
     } catch (error) {
@@ -83,7 +83,7 @@ const StudentManagement = () => {
       await axios.post(`${API_URL}/api/enrollments`, {
         student_id: selectedStudent.id,
         course_id: selectedCourse
-      }, { withCredentials: true });
+      });
       toast.success('Student enrolled successfully');
       setEnrollDialogOpen(false);
       setSelectedStudent(null);

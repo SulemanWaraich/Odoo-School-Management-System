@@ -42,9 +42,9 @@ const GradesManagement = () => {
   const fetchData = async () => {
     try {
       const [overviewRes, examsRes, coursesRes] = await Promise.all([
-        axios.get(`${API_URL}/api/performance/overview`, { withCredentials: true }),
-        axios.get(`${API_URL}/api/exams`, { withCredentials: true }),
-        axios.get(`${API_URL}/api/courses`, { withCredentials: true })
+        axios.get(`${API_URL}/api/performance/overview`),
+        axios.get(`${API_URL}/api/exams`),
+        axios.get(`${API_URL}/api/courses`)
       ]);
       setOverview(overviewRes.data);
       setExams(examsRes.data);
@@ -64,10 +64,10 @@ const GradesManagement = () => {
     }
     try {
       if (editExam) {
-        await axios.put(`${API_URL}/api/exams/${editExam.id}`, examForm, { withCredentials: true });
+        await axios.put(`${API_URL}/api/exams/${editExam.id}`, examForm);
         toast.success('Exam updated');
       } else {
-        await axios.post(`${API_URL}/api/exams`, examForm, { withCredentials: true });
+        await axios.post(`${API_URL}/api/exams`, examForm);
         toast.success('Exam created');
       }
       setExamDialogOpen(false);
@@ -82,7 +82,7 @@ const GradesManagement = () => {
   const handleDeleteExam = async (examId) => {
     if (!window.confirm('Delete this exam and all its results?')) return;
     try {
-      await axios.delete(`${API_URL}/api/exams/${examId}`, { withCredentials: true });
+      await axios.delete(`${API_URL}/api/exams/${examId}`);
       toast.success('Exam deleted');
       fetchData();
     } catch (error) {

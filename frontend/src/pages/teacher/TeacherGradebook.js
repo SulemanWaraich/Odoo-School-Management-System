@@ -50,7 +50,7 @@ const TeacherGradebook = () => {
 
   const fetchCourses = async () => {
     try {
-      const response = await axios.get(`${API_URL}/api/courses`, { withCredentials: true });
+      const response = await axios.get(`${API_URL}/api/courses`);
       setCourses(response.data);
       if (response.data.length > 0) {
         setSelectedCourse(response.data[0].id);
@@ -64,7 +64,7 @@ const TeacherGradebook = () => {
   const fetchGradebook = async (courseId) => {
     try {
       setLoading(true);
-      const response = await axios.get(`${API_URL}/api/gradebook/${courseId}`, { withCredentials: true });
+      const response = await axios.get(`${API_URL}/api/gradebook/${courseId}`);
       setGradebook(response.data);
     } catch (error) {
       console.error('Error fetching gradebook:', error);
@@ -76,7 +76,7 @@ const TeacherGradebook = () => {
 
   const fetchExams = async () => {
     try {
-      const response = await axios.get(`${API_URL}/api/exams?course_id=${selectedCourse}`, { withCredentials: true });
+      const response = await axios.get(`${API_URL}/api/exams?course_id=${selectedCourse}`);
       setExams(response.data);
     } catch (error) {
       console.error('Error fetching exams:', error);
@@ -92,7 +92,7 @@ const TeacherGradebook = () => {
       await axios.post(`${API_URL}/api/exams`, {
         ...examForm,
         course_id: selectedCourse
-      }, { withCredentials: true });
+      });
       toast.success('Exam created');
       setExamDialogOpen(false);
       setExamForm({
@@ -153,7 +153,7 @@ const TeacherGradebook = () => {
         await axios.post(`${API_URL}/api/grades/bulk`, {
           assignment_id: selectedAssignment.id,
           grades
-        }, { withCredentials: true });
+        });
         toast.success('Assignment grades saved');
       } else if (selectedExam) {
         const results = Object.entries(gradeForm)
@@ -167,7 +167,7 @@ const TeacherGradebook = () => {
         await axios.post(`${API_URL}/api/exam-results/bulk`, {
           exam_id: selectedExam.id,
           results
-        }, { withCredentials: true });
+        });
         toast.success('Exam results saved');
       }
       

@@ -68,7 +68,7 @@ const SetupWizard = () => {
 
   const fetchSetupStatus = async () => {
     try {
-      const response = await axios.get(`${API_URL}/api/setup/status`, { withCredentials: true });
+      const response = await axios.get(`${API_URL}/api/setup/status`);
       setSetupStatus(response.data);
       if (response.data.school_profile) {
         setSchoolProfile(response.data.school_profile);
@@ -82,7 +82,7 @@ const SetupWizard = () => {
 
   const fetchTerms = async () => {
     try {
-      const response = await axios.get(`${API_URL}/api/academic-terms`, { withCredentials: true });
+      const response = await axios.get(`${API_URL}/api/academic-terms`);
       setTerms(response.data);
     } catch (error) {
       console.error('Error fetching terms:', error);
@@ -91,7 +91,7 @@ const SetupWizard = () => {
 
   const fetchCourses = async () => {
     try {
-      const response = await axios.get(`${API_URL}/api/courses`, { withCredentials: true });
+      const response = await axios.get(`${API_URL}/api/courses`);
       setCourses(response.data);
     } catch (error) {
       console.error('Error fetching courses:', error);
@@ -100,7 +100,7 @@ const SetupWizard = () => {
 
   const fetchTeachers = async () => {
     try {
-      const response = await axios.get(`${API_URL}/api/teachers`, { withCredentials: true });
+      const response = await axios.get(`${API_URL}/api/teachers`);
       setTeachers(response.data);
     } catch (error) {
       console.error('Error fetching teachers:', error);
@@ -109,7 +109,7 @@ const SetupWizard = () => {
 
   const fetchStudents = async () => {
     try {
-      const response = await axios.get(`${API_URL}/api/students`, { withCredentials: true });
+      const response = await axios.get(`${API_URL}/api/students`);
       setAvailableStudents(response.data);
     } catch (error) {
       console.error('Error fetching students:', error);
@@ -123,7 +123,7 @@ const SetupWizard = () => {
       return;
     }
     try {
-      await axios.post(`${API_URL}/api/setup/school-profile`, schoolProfile, { withCredentials: true });
+      await axios.post(`${API_URL}/api/setup/school-profile`, schoolProfile);
       toast.success('School profile saved');
       setCurrentStep(2);
     } catch (error) {
@@ -138,7 +138,7 @@ const SetupWizard = () => {
       return;
     }
     try {
-      await axios.post(`${API_URL}/api/academic-terms`, newTerm, { withCredentials: true });
+      await axios.post(`${API_URL}/api/academic-terms`, newTerm);
       toast.success('Academic term added');
       setNewTerm({ name: '', start_date: '', end_date: '', is_current: false });
       fetchTerms();
@@ -149,7 +149,7 @@ const SetupWizard = () => {
 
   const deleteTerm = async (termId) => {
     try {
-      await axios.delete(`${API_URL}/api/academic-terms/${termId}`, { withCredentials: true });
+      await axios.delete(`${API_URL}/api/academic-terms/${termId}`);
       toast.success('Term deleted');
       fetchTerms();
     } catch (error) {
@@ -164,7 +164,7 @@ const SetupWizard = () => {
       return;
     }
     try {
-      await axios.post(`${API_URL}/api/courses`, newCourse, { withCredentials: true });
+      await axios.post(`${API_URL}/api/courses`, newCourse);
       toast.success('Course added');
       setNewCourse({ name: '', code: '', grade: '', teacher_id: '' });
       fetchCourses();
@@ -191,7 +191,7 @@ const SetupWizard = () => {
     try {
       const response = await axios.post(`${API_URL}/api/setup/bulk-import/students`, 
         { students: studentsPreview }, 
-        { withCredentials: true }
+        {}
       );
       toast.success(`Imported ${response.data.created} students`);
       if (response.data.errors.length > 0) {
@@ -222,7 +222,7 @@ const SetupWizard = () => {
     try {
       const response = await axios.post(`${API_URL}/api/setup/bulk-import/teachers`, 
         { teachers: teachersPreview }, 
-        { withCredentials: true }
+        {}
       );
       toast.success(`Imported ${response.data.created} teachers`);
       if (response.data.errors.length > 0) {
@@ -244,7 +244,7 @@ const SetupWizard = () => {
     try {
       const response = await axios.post(`${API_URL}/api/setup/bulk-enroll`, 
         { course_id: selectedCourse, student_ids: selectedStudents }, 
-        { withCredentials: true }
+        {}
       );
       toast.success(`Enrolled ${response.data.enrolled} students`);
       setSelectedStudents([]);

@@ -51,7 +51,7 @@ const UserManagement = () => {
       if (statusFilter !== 'all') params.append('status', statusFilter);
       if (search) params.append('search', search);
       
-      const response = await axios.get(`${API_URL}/api/admin/users/all?${params.toString()}`, { withCredentials: true });
+      const response = await axios.get(`${API_URL}/api/admin/users/all?${params.toString()}`);
       setUsers(response.data);
     } catch (error) {
       console.error('Error fetching users:', error);
@@ -72,7 +72,7 @@ const UserManagement = () => {
     }
 
     try {
-      await axios.post(`${API_URL}/api/admin/users/create`, createForm, { withCredentials: true });
+      await axios.post(`${API_URL}/api/admin/users/create`, createForm);
       toast.success('User created successfully');
       setCreateDialogOpen(false);
       resetCreateForm();
@@ -84,7 +84,7 @@ const UserManagement = () => {
 
   const handleUpdateRole = async (userId, newRole) => {
     try {
-      await axios.put(`${API_URL}/api/admin/users/${userId}/role`, { role: newRole }, { withCredentials: true });
+      await axios.put(`${API_URL}/api/admin/users/${userId}/role`, { role: newRole });
       toast.success('Role updated successfully');
       fetchUsers();
     } catch (error) {
@@ -94,7 +94,7 @@ const UserManagement = () => {
 
   const handleToggleStatus = async (userId, currentStatus) => {
     try {
-      await axios.put(`${API_URL}/api/admin/users/${userId}/status`, { is_active: !currentStatus }, { withCredentials: true });
+      await axios.put(`${API_URL}/api/admin/users/${userId}/status`, { is_active: !currentStatus });
       toast.success(`User ${currentStatus ? 'deactivated' : 'activated'} successfully`);
       fetchUsers();
     } catch (error) {
@@ -111,7 +111,7 @@ const UserManagement = () => {
     try {
       await axios.post(`${API_URL}/api/admin/users/${selectedUser.user_id}/reset-password`, 
         { password: newPassword }, 
-        { withCredentials: true }
+        {}
       );
       toast.success('Password reset successfully');
       setResetPasswordDialogOpen(false);
@@ -126,7 +126,7 @@ const UserManagement = () => {
     if (!window.confirm('Are you sure you want to delete this user? This action cannot be undone.')) return;
 
     try {
-      await axios.delete(`${API_URL}/api/admin/users/${userId}`, { withCredentials: true });
+      await axios.delete(`${API_URL}/api/admin/users/${userId}`);
       toast.success('User deleted successfully');
       fetchUsers();
     } catch (error) {

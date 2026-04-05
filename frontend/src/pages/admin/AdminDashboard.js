@@ -17,7 +17,7 @@ const AdminDashboard = () => {
 
   const fetchStats = async () => {
     try {
-      const response = await axios.get(`${API_URL}/api/stats/admin`, { withCredentials: true });
+      const response = await axios.get(`${API_URL}/api/stats/admin`);
       setStats(response.data);
     } catch (error) {
       console.error('Error fetching stats:', error);

@@ -6,6 +6,7 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
+import re
 import logging
 from pathlib import Path
 from pydantic import BaseModel, Field, EmailStr
@@ -22,25 +23,62 @@ from bson import ObjectId
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Allowed origins for CORS (specific origins, not *)
-ALLOWED_ORIGINS = []
+# =============================================================================
+# CORS CONFIGURATION - Dynamic origin support for Emergent preview URLs
+# =============================================================================
 
-# Add origins from environment first
+# Regex pattern to match any Emergent preview URL
+# Matches: https://*.preview.emergentagent.com
+EMERGENT_PREVIEW_PATTERN = re.compile(r'^https://[a-zA-Z0-9-]+\.preview\.emergentagent\.com$')
+
+# Static allowed origins (localhost for development)
+STATIC_ALLOWED_ORIGINS = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+]
+
+# Add any additional origins from environment
 env_origins = os.environ.get('FRONTEND_URL', '')
 if env_origins:
     for origin in env_origins.split(','):
         origin = origin.strip()
-        if origin and origin not in ALLOWED_ORIGINS:
-            ALLOWED_ORIGINS.append(origin)
+        if origin and origin not in STATIC_ALLOWED_ORIGINS:
+            STATIC_ALLOWED_ORIGINS.append(origin)
 
-# Add default origins if none specified
-if not ALLOWED_ORIGINS:
-    ALLOWED_ORIGINS = [
-        "https://github-base-onboard.preview.emergentagent.com",
-        "https://bc462be7-4001-4dfb-8255-ae63d7a0db8d.preview.emergentagent.com",
-        "http://localhost:3000",
-        "http://127.0.0.1:3000"
-    ]
+def is_allowed_origin(origin: str) -> bool:
+    """
+    Check if an origin is allowed for CORS.
+    Returns True if:
+    - Origin matches the Emergent preview URL pattern (*.preview.emergentagent.com)
+    - Origin is in the static allowed origins list
+    - Origin is localhost/127.0.0.1 for development
+    """
+    if not origin:
+        return False
+    
+    # Check if it matches Emergent preview pattern
+    if EMERGENT_PREVIEW_PATTERN.match(origin):
+        return True
+    
+    # Check static allowed origins
+    if origin in STATIC_ALLOWED_ORIGINS:
+        return True
+    
+    return False
+
+def get_cors_origin(request_origin: str) -> str:
+    """
+    Get the appropriate CORS origin to return.
+    If the request origin is allowed, return it exactly (required for credentials).
+    Otherwise return a default safe origin.
+    """
+    if is_allowed_origin(request_origin):
+        return request_origin
+    
+    # Fallback to first static origin (for cases without origin header)
+    return STATIC_ALLOWED_ORIGINS[0] if STATIC_ALLOWED_ORIGINS else "http://localhost:3000"
 
 # MongoDB connection
 mongo_url = os.environ['MONGO_URL']
@@ -60,41 +98,59 @@ storage_key = None
 # Create the main app
 app = FastAPI(title="School Management System")
 
-# Override CORS headers at response level using middleware
-# This middleware runs LAST (after all other middleware and the proxy)
+# =============================================================================
+# CORS MIDDLEWARE - Handles all CORS headers for Emergent preview URLs
+# =============================================================================
 @app.middleware("http")
-async def force_cors_headers(request: Request, call_next):
+async def cors_middleware(request: Request, call_next):
+    """
+    Custom CORS middleware that:
+    1. Dynamically allows any *.preview.emergentagent.com origin
+    2. Properly handles preflight OPTIONS requests
+    3. Sets credentials support for authenticated requests
+    4. Works with both cookie and token-based authentication
+    """
     origin = request.headers.get("origin", "")
     
-    # Determine allowed origin
-    if origin in ALLOWED_ORIGINS:
-        allowed_origin = origin
-    elif origin:
-        allowed_origin = ALLOWED_ORIGINS[0] if ALLOWED_ORIGINS else origin
-    else:
-        allowed_origin = ALLOWED_ORIGINS[0] if ALLOWED_ORIGINS else "*"
+    # Get the appropriate CORS origin (either the request origin if allowed, or a fallback)
+    cors_origin = get_cors_origin(origin) if origin else ""
     
-    # Handle preflight (OPTIONS) requests
+    # Standard CORS headers
+    cors_headers = {
+        "Access-Control-Allow-Credentials": "true",
+        "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS, PATCH, HEAD",
+        "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Requested-With, Accept, Origin, Cookie, X-CSRF-Token",
+        "Access-Control-Expose-Headers": "Content-Length, Content-Type, X-Request-ID",
+        "Access-Control-Max-Age": "600",
+        "Vary": "Origin",
+    }
+    
+    # Only set Allow-Origin if we have a valid origin
+    if cors_origin:
+        cors_headers["Access-Control-Allow-Origin"] = cors_origin
+    
+    # Handle preflight OPTIONS requests
     if request.method == "OPTIONS":
         return Response(
             content="",
             status_code=200,
-            headers={
-                "Access-Control-Allow-Origin": allowed_origin,
-                "Access-Control-Allow-Credentials": "true",
-                "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS, PATCH, HEAD",
-                "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Requested-With, Accept, Origin, Cookie",
-                "Access-Control-Max-Age": "600",
-                "Vary": "Origin",
-            }
+            headers=cors_headers
         )
     
-    response = await call_next(request)
+    # Process the actual request
+    try:
+        response = await call_next(request)
+    except Exception as e:
+        # Even on error, we need CORS headers for the browser to see the error
+        logger.error(f"Request error: {e}")
+        response = JSONResponse(
+            status_code=500,
+            content={"detail": "Internal server error"}
+        )
     
-    # Force set CORS headers (overwrite any existing)
-    response.headers["Access-Control-Allow-Origin"] = allowed_origin
-    response.headers["Access-Control-Allow-Credentials"] = "true"
-    response.headers["Vary"] = "Origin"
+    # Add CORS headers to the response
+    for header, value in cors_headers.items():
+        response.headers[header] = value
     
     return response
 
@@ -3441,15 +3497,9 @@ async def get_performance_overview(request: Request):
 # Include the router in the main app
 app.include_router(api_router)
 
-# Standard CORS Configuration as backup (the @app.middleware("http") handles the main CORS logic)
-app.add_middleware(
-    CORSMiddleware,
-    allow_credentials=True,
-    allow_origins=ALLOWED_ORIGINS,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH", "HEAD"],
-    allow_headers=["*"],
-    expose_headers=["*"],
-)
+# Note: We use ONLY our custom cors_middleware above, NOT the standard CORSMiddleware
+# This is because Starlette's CORSMiddleware doesn't support dynamic origin matching
+# and always returns "*" which conflicts with credentials
 
 # Startup event
 @app.on_event("startup")

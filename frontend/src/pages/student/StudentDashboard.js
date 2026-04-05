@@ -20,7 +20,7 @@ const StudentDashboard = () => {
 
   const fetchStats = async () => {
     try {
-      const response = await axios.get(`${API_URL}/api/stats/student`, { withCredentials: true });
+      const response = await axios.get(`${API_URL}/api/stats/student`);
       setStats(response.data);
     } catch (error) {
       console.error('Error fetching stats:', error);
@@ -31,7 +31,7 @@ const StudentDashboard = () => {
 
   const fetchAnnouncements = async () => {
     try {
-      const response = await axios.get(`${API_URL}/api/announcements`, { withCredentials: true });
+      const response = await axios.get(`${API_URL}/api/announcements`);
       setAnnouncements(response.data.slice(0, 3));
     } catch (error) {
       console.error('Error fetching announcements:', error);

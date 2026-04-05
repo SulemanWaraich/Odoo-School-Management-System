@@ -17,7 +17,7 @@ const TeacherDashboard = () => {
 
   const fetchStats = async () => {
     try {
-      const response = await axios.get(`${API_URL}/api/stats/teacher`, { withCredentials: true });
+      const response = await axios.get(`${API_URL}/api/stats/teacher`);
       setStats(response.data);
     } catch (error) {
       console.error('Error fetching stats:', error);

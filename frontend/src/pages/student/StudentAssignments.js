@@ -33,7 +33,7 @@ const StudentAssignments = () => {
 
   const fetchAssignments = async () => {
     try {
-      const response = await axios.get(`${API_URL}/api/assignments`, { withCredentials: true });
+      const response = await axios.get(`${API_URL}/api/assignments`);
       setAssignments(response.data);
     } catch (error) {
       console.error('Error fetching assignments:', error);
@@ -44,7 +44,7 @@ const StudentAssignments = () => {
 
   const fetchSubmissions = async () => {
     try {
-      const response = await axios.get(`${API_URL}/api/submissions`, { withCredentials: true });
+      const response = await axios.get(`${API_URL}/api/submissions`);
       setSubmissions(response.data);
     } catch (error) {
       console.error('Error fetching submissions:', error);
@@ -85,7 +85,6 @@ const StudentAssignments = () => {
         formData.append('file', file);
 
         const uploadResponse = await axios.post(`${API_URL}/api/submissions/upload`, formData, {
-          withCredentials: true,
           headers: { 'Content-Type': 'multipart/form-data' }
         });
 
@@ -99,7 +98,7 @@ const StudentAssignments = () => {
         file_path: filePath,
         file_name: fileName,
         notes: notes
-      }, { withCredentials: true });
+      });
 
       toast.success('Assignment submitted successfully');
       setDialogOpen(false);

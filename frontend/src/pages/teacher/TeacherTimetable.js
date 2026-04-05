@@ -20,7 +20,7 @@ const TeacherTimetable = () => {
 
   const fetchTimetable = async () => {
     try {
-      const response = await axios.get(`${API_URL}/api/timetable/weekly`, { withCredentials: true });
+      const response = await axios.get(`${API_URL}/api/timetable/weekly`);
       setWeekly(response.data);
       
       // Get today's classes
