@@ -4,6 +4,7 @@ load_dotenv()
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, Request, Response, File, UploadFile, Query
 from fastapi.responses import JSONResponse
 from starlette.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import logging
@@ -21,6 +22,58 @@ from bson import ObjectId
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+# Allowed origins for CORS (specific origins, not *)
+ALLOWED_ORIGINS = [
+    "https://github-base-onboard.preview.emergentagent.com",
+    "https://bc462be7-4001-4dfb-8255-ae63d7a0db8d.preview.emergentagent.com",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000"
+]
+
+# Add origins from environment if specified
+env_origins = os.environ.get('FRONTEND_URL', '')
+if env_origins:
+    for origin in env_origins.split(','):
+        origin = origin.strip()
+        if origin and origin not in ALLOWED_ORIGINS:
+            ALLOWED_ORIGINS.append(origin)
+
+# Custom CORS middleware to ensure headers are always set correctly
+# This overrides any proxy-level CORS headers
+class CustomCORSMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        origin = request.headers.get("origin", "")
+        
+        # Determine the correct origin to use
+        allowed_origin = origin if origin in ALLOWED_ORIGINS else ALLOWED_ORIGINS[0]
+        
+        # Handle preflight requests
+        if request.method == "OPTIONS":
+            response = Response(status_code=200)
+            response.headers["Access-Control-Allow-Origin"] = allowed_origin
+            response.headers["Access-Control-Allow-Credentials"] = "true"
+            response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH, HEAD"
+            response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Requested-With, Accept, Origin, Cookie"
+            response.headers["Access-Control-Max-Age"] = "600"
+            response.headers["Vary"] = "Origin"
+            return response
+        
+        # Process the request
+        response = await call_next(request)
+        
+        # Remove any existing CORS headers that might conflict (from proxy)
+        # Note: We can't remove headers, but we can overwrite them
+        
+        # Set CORS headers on response - these will be the final values
+        response.headers["Access-Control-Allow-Origin"] = allowed_origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH, HEAD"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Requested-With, Accept, Origin, Cookie"
+        response.headers["Access-Control-Expose-Headers"] = "Content-Length, Content-Type"
+        response.headers["Vary"] = "Origin"
+        
+        return response
 
 # MongoDB connection
 mongo_url = os.environ['MONGO_URL']
@@ -3348,16 +3401,17 @@ async def get_performance_overview(request: Request):
 # Include the router in the main app
 app.include_router(api_router)
 
-# CORS Configuration
-frontend_url = os.environ.get('FRONTEND_URL', os.environ.get('CORS_ORIGINS', '*'))
-origins = frontend_url.split(',') if ',' in frontend_url else [frontend_url]
+# Add custom CORS middleware (this runs first, before the standard CORSMiddleware)
+app.add_middleware(CustomCORSMiddleware)
 
+# Standard CORS Configuration as backup
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=origins if origins != ['*'] else ["*"],
-    allow_methods=["*"],
+    allow_origins=ALLOWED_ORIGINS,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH", "HEAD"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
 
 # Startup event
