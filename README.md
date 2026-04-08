@@ -169,9 +169,6 @@ Password: admin123
 ---
 
 ### 📌 Roadmap
-🔜 Upcoming (P1)
-Grading Module
-Timetable / Scheduling System
 
 ### 🚀 Future (P2)
 - Parent Portal
