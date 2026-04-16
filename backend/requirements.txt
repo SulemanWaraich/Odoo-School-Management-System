@@ -3,6 +3,7 @@ uvicorn[standard]==0.29.0
 
 pydantic==2.12.5
 python-dotenv==1.0.1
+email-validator==2.3.0
 
 # Auth / security
 passlib==1.7.4
