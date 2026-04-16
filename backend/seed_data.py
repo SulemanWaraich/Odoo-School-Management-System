@@ -336,8 +336,8 @@ async def seed_data():
 """
     
     from pathlib import Path
-    Path("/app/memory").mkdir(parents=True, exist_ok=True)
-    with open("/app/memory/test_credentials.md", "w") as f:
+    Path("/tmp").mkdir(parents=True, exist_ok=True)
+    with open("/tmp/test_credentials.md", "w") as f:
         f.write(credentials)
     
     print("\n✅ Seed completed successfully!")

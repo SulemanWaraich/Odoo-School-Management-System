@@ -1,5 +1,8 @@
 from dotenv import load_dotenv
 load_dotenv()
+import cloudinary
+import cloudinary.uploader
+
 
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, Request, Response, File, UploadFile, Query
 from fastapi.responses import JSONResponse
@@ -90,10 +93,13 @@ JWT_SECRET = os.environ.get('JWT_SECRET', secrets.token_hex(32))
 JWT_ALGORITHM = "HS256"
 
 # Object Storage Configuration
-STORAGE_URL = "https://integrations.emergentagent.com/objstore/api/v1/storage"
-EMERGENT_KEY = os.environ.get("EMERGENT_LLM_KEY")
-APP_NAME = "school-management"
-storage_key = None
+# Cloudinary Configuration
+
+cloudinary.config(
+    cloud_name=os.environ.get("CLOUDINARY_CLOUD_NAME"),
+    api_key=os.environ.get("CLOUDINARY_API_KEY"),
+    api_secret=os.environ.get("CLOUDINARY_API_SECRET")
+)
 
 # Create the main app
 app = FastAPI(title="School Management System")
@@ -325,41 +331,19 @@ def require_role(*roles):
 
 # ================== STORAGE HELPERS ==================
 
-def init_storage():
-    global storage_key
-    if storage_key:
-        return storage_key
+def upload_to_cloudinary(data: bytes, filename: str, content_type: str) -> str:
+    """Upload file to Cloudinary and return permanent URL"""
     try:
-        resp = requests.post(f"{STORAGE_URL}/init", json={"emergent_key": EMERGENT_KEY}, timeout=30)
-        resp.raise_for_status()
-        storage_key = resp.json()["storage_key"]
-        return storage_key
+        result = cloudinary.uploader.upload(
+            data,
+            folder="school-management/submissions",
+            resource_type="auto",
+            public_id=f"{uuid.uuid4().hex}_{filename}"
+        )
+        return result["secure_url"]
     except Exception as e:
-        logger.error(f"Storage init failed: {e}")
-        return None
-
-def put_object(path: str, data: bytes, content_type: str) -> dict:
-    key = init_storage()
-    if not key:
-        raise HTTPException(status_code=500, detail="Storage not available")
-    resp = requests.put(
-        f"{STORAGE_URL}/objects/{path}",
-        headers={"X-Storage-Key": key, "Content-Type": content_type},
-        data=data, timeout=120
-    )
-    resp.raise_for_status()
-    return resp.json()
-
-def get_object(path: str) -> tuple:
-    key = init_storage()
-    if not key:
-        raise HTTPException(status_code=500, detail="Storage not available")
-    resp = requests.get(
-        f"{STORAGE_URL}/objects/{path}",
-        headers={"X-Storage-Key": key}, timeout=60
-    )
-    resp.raise_for_status()
-    return resp.content, resp.headers.get("Content-Type", "application/octet-stream")
+        logger.error(f"Cloudinary upload failed: {e}")
+        raise HTTPException(status_code=500, detail="File upload failed")
 
 # ================== AUTH ENDPOINTS ==================
 
@@ -1959,30 +1943,25 @@ async def upload_submission_file(
     if user["role"] != "student":
         raise HTTPException(status_code=403, detail="Only students can upload")
     
-    ext = file.filename.split(".")[-1] if "." in file.filename else "bin"
-    path = f"{APP_NAME}/submissions/{user['user_id']}/{uuid.uuid4()}.{ext}"
     data = await file.read()
+    url = upload_to_cloudinary(data, file.filename, file.content_type or "application/octet-stream")
     
-    result = put_object(path, data, file.content_type or "application/octet-stream")
-    
-    return {"path": result["path"], "filename": file.filename}
+    return {"path": url, "filename": file.filename}
 
 @api_router.get("/files/{path:path}")
 async def download_file(path: str, request: Request, auth: str = Query(None)):
-    # Verify authentication
+    # Files are now served directly via Cloudinary URLs
+    # This endpoint redirects to the Cloudinary URL if needed
     try:
         if auth:
-            # Handle query param auth for direct file access
             request.cookies["access_token"] = auth
         await get_current_user(request)
     except:
         raise HTTPException(status_code=401, detail="Not authenticated")
     
-    try:
-        data, content_type = get_object(path)
-        return Response(content=data, media_type=content_type)
-    except Exception as e:
-        raise HTTPException(status_code=404, detail="File not found")
+    # With Cloudinary, file_path in submissions IS the full URL
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url=f"https://res.cloudinary.com/{os.environ.get('CLOUDINARY_CLOUD_NAME')}/{path}")
 
 # ================== WEEKLY PROGRESS ENDPOINTS ==================
 
@@ -3533,13 +3512,7 @@ async def startup():
     await db.timetable.create_index([("day_of_week", 1), ("start_time", 1)])
     await db.timetable.create_index("teacher_id")
     await db.timetable.create_index("course_id")
-    
-    # Initialize storage
-    try:
-        init_storage()
-        logger.info("Storage initialized")
-    except Exception as e:
-        logger.error(f"Storage init failed: {e}")
+   
     
     # Seed admin user
     admin_email = os.environ.get("ADMIN_EMAIL", "admin@school.com")
@@ -3567,8 +3540,8 @@ async def startup():
     
     # Create test credentials file
     try:
-        Path("/app/memory").mkdir(parents=True, exist_ok=True)
-        with open("/app/memory/test_credentials.md", "w") as f:
+        Path("/tmp/memory").mkdir(parents=True, exist_ok=True)
+        with open("/tmp/memory/test_credentials.md", "w") as f:
             f.write(f"""# Test Credentials
 
 ## Admin Account
