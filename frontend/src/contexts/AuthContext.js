@@ -151,6 +151,18 @@ export const AuthProvider = ({ children }) => {
     return response.data;
   };
 
+  // Add this function inside your AuthContext provider
+const setUserFromTokens = async (accessToken) => {
+  const response = await axios.get('/api/auth/me', {
+    headers: { Authorization: `Bearer ${accessToken}` }
+  });
+  setUser(response.data); // update the user state in context
+  return response.data;
+};
+
+// Make sure to expose it in the context value:
+// value={{ user, login, logout, setUserFromTokens, ... }}
+
   const value = {
     user,
     loading,
@@ -159,7 +171,8 @@ export const AuthProvider = ({ children }) => {
     logout,
     loginWithGoogle,
     handleOAuthCallback,
-    refreshAuth: checkAuth
+    refreshAuth: checkAuth,
+    setUserFromTokens
   };
 
   return (

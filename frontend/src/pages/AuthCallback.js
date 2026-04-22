@@ -1,3 +1,7 @@
+// src/pages/AuthCallback.jsx
+// Handles the redirect from backend after Google OAuth.
+// Backend sends: /auth/callback?access_token=...&refresh_token=...&role=...&user_id=...
+
 import React, { useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
@@ -6,7 +10,7 @@ import { toast } from 'sonner';
 
 const AuthCallback = () => {
   const navigate = useNavigate();
-  const { handleOAuthCallback } = useAuth();
+  const { setUserFromTokens } = useAuth(); // ✅ We'll use this to update auth state
   const hasProcessed = useRef(false);
 
   useEffect(() => {
@@ -15,23 +19,41 @@ const AuthCallback = () => {
     hasProcessed.current = true;
 
     const processCallback = async () => {
-      const hash = window.location.hash;
-      const sessionIdMatch = hash.match(/session_id=([^&]+)/);
-      
-      if (!sessionIdMatch) {
-        toast.error('Invalid authentication response');
-        navigate('/login');
+      // ✅ Backend sends tokens as QUERY PARAMS (?key=value), not hash (#key=value)
+      // server.py: f"{FRONTEND_URL}/auth/callback?access_token=...&refresh_token=...&role=..."
+      const params = new URLSearchParams(window.location.search);
+      const accessToken = params.get('access_token');
+      const refreshToken = params.get('refresh_token');
+      const role = params.get('role');
+      const error = params.get('error');
+
+      // Handle error redirected from backend
+      if (error) {
+        toast.error(`Authentication failed: ${error}`);
+        navigate('/login', { replace: true });
         return;
       }
 
-      const sessionId = sessionIdMatch[1];
+      // Validate we got tokens
+      if (!accessToken) {
+        toast.error('Invalid authentication response');
+        navigate('/login', { replace: true });
+        return;
+      }
 
       try {
-        const userData = await handleOAuthCallback(sessionId);
+        // ✅ Store tokens so API calls can use them
+        localStorage.setItem('access_token', accessToken);
+        localStorage.setItem('refresh_token', refreshToken);
+
+        // ✅ Tell AuthContext about the new user by fetching /api/auth/me
+        await setUserFromTokens(accessToken);
+
         toast.success('Login successful!');
-        
+
+        // ✅ Redirect based on role
         const routes = { admin: '/admin', teacher: '/teacher', student: '/student' };
-        navigate(routes[userData.role] || '/student', { replace: true });
+        navigate(routes[role] || '/student', { replace: true });
       } catch (error) {
         console.error('OAuth callback error:', error);
         toast.error('Authentication failed. Please try again.');
@@ -40,7 +62,7 @@ const AuthCallback = () => {
     };
 
     processCallback();
-  }, [handleOAuthCallback, navigate]);
+  }, [navigate, setUserFromTokens]);
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-slate-50">
