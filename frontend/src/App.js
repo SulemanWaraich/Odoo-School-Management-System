@@ -74,9 +74,9 @@ const AppRouter = () => {
   const location = useLocation();
   
   // Check for OAuth callback synchronously during render
-  if (location.hash?.includes('session_id=')) {
-    return <AuthCallback />;
-  }
+  // if (location.hash?.includes('session_id=')) {
+  //   return <AuthCallback />;
+  // }
 
   return (
     <Routes>
