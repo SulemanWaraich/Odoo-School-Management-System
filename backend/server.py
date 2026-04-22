@@ -5,7 +5,7 @@ import cloudinary.uploader
 
 
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, Request, Response, File, UploadFile, Query
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 
 # Regex pattern to match any Emergent preview URL
 # Matches: https://*.preview.emergentagent.com
-EMERGENT_PREVIEW_PATTERN = re.compile(r'^https://[a-zA-Z0-9-]+\.preview\.emergentagent\.com$')
+# EMERGENT_PREVIEW_PATTERN = re.compile(r'^https://[a-zA-Z0-9-]+\.preview\.emergentagent\.com$')
 
 # Static allowed origins (localhost for development)
 STATIC_ALLOWED_ORIGINS = [
@@ -52,25 +52,32 @@ if env_origins:
             STATIC_ALLOWED_ORIGINS.append(origin)
 
 def is_allowed_origin(origin: str) -> bool:
-    """
-    Check if an origin is allowed for CORS.
-    Returns True if:
-    - Origin matches the Emergent preview URL pattern (*.preview.emergentagent.com)
-    - Origin is in the static allowed origins list
-    - Origin is localhost/127.0.0.1 for development
-    """
     if not origin:
         return False
-    
-    # Check if it matches Emergent preview pattern
-    if EMERGENT_PREVIEW_PATTERN.match(origin):
-        return True
-    
-    # Check static allowed origins
     if origin in STATIC_ALLOWED_ORIGINS:
         return True
-    
     return False
+
+# def is_allowed_origin(origin: str) -> bool:
+#     """
+#     Check if an origin is allowed for CORS.
+#     Returns True if:
+#     - Origin matches the Emergent preview URL pattern (*.preview.emergentagent.com)
+#     - Origin is in the static allowed origins list
+#     - Origin is localhost/127.0.0.1 for development
+#     """
+#     if not origin:
+#         return False
+    
+#     # Check if it matches Emergent preview pattern
+#     if EMERGENT_PREVIEW_PATTERN.match(origin):
+#         return True
+    
+#     # Check static allowed origins
+#     if origin in STATIC_ALLOWED_ORIGINS:
+#         return True
+    
+#     return False
 
 def get_cors_origin(request_origin: str) -> str:
     """
@@ -92,6 +99,12 @@ db = client[os.environ['DB_NAME']]
 # JWT Configuration
 JWT_SECRET = os.environ.get('JWT_SECRET', secrets.token_hex(32))
 JWT_ALGORITHM = "HS256"
+
+# Google OAuth Configuration
+GOOGLE_CLIENT_ID = os.environ.get('GOOGLE_CLIENT_ID', '')
+GOOGLE_CLIENT_SECRET = os.environ.get('GOOGLE_CLIENT_SECRET', '')
+GOOGLE_REDIRECT_URI = os.environ.get('GOOGLE_REDIRECT_URI', 'http://localhost:8000/api/auth/google/callback')
+FRONTEND_URL = os.environ.get('FRONTEND_URL', 'http://localhost:3000')
 
 # Object Storage Configuration
 # Cloudinary Configuration
@@ -288,20 +301,20 @@ async def get_current_user(request: Request) -> dict:
             token = auth_header[7:]
     
     # Also check session_token for Google OAuth
-    session_token = request.cookies.get("session_token")
-    if not token and session_token:
-        session = await db.user_sessions.find_one({"session_token": session_token}, {"_id": 0})
-        if session:
-            expires_at = session.get("expires_at")
-            if isinstance(expires_at, str):
-                expires_at = datetime.fromisoformat(expires_at)
-            if expires_at.tzinfo is None:
-                expires_at = expires_at.replace(tzinfo=timezone.utc)
-            if expires_at > datetime.now(timezone.utc):
-                user = await db.users.find_one({"user_id": session["user_id"]}, {"_id": 0})
-                if user:
-                    user.pop("password_hash", None)
-                    return user
+    # session_token = request.cookies.get("session_token")
+    # if not token and session_token:
+    #     session = await db.user_sessions.find_one({"session_token": session_token}, {"_id": 0})
+    #     if session:
+    #         expires_at = session.get("expires_at")
+    #         if isinstance(expires_at, str):
+    #             expires_at = datetime.fromisoformat(expires_at)
+    #         if expires_at.tzinfo is None:
+    #             expires_at = expires_at.replace(tzinfo=timezone.utc)
+    #         if expires_at > datetime.now(timezone.utc):
+    #             user = await db.users.find_one({"user_id": session["user_id"]}, {"_id": 0})
+    #             if user:
+    #                 user.pop("password_hash", None)
+    #                 return user
     
     if not token:
         raise HTTPException(status_code=401, detail="Not authenticated")
@@ -458,7 +471,7 @@ async def login(data: UserLogin, response: Response, request: Request):
 async def logout(response: Response):
     response.delete_cookie("access_token", path="/")
     response.delete_cookie("refresh_token", path="/")
-    response.delete_cookie("session_token", path="/")
+    # response.delete_cookie("session_token", path="/")
     return {"message": "Logged out"}
 
 @api_router.get("/auth/me")
@@ -498,91 +511,234 @@ async def refresh_token(request: Request, response: Response):
         raise HTTPException(status_code=401, detail="Invalid refresh token")
 
 # Google OAuth session endpoint
-@api_router.post("/auth/session")
-async def create_session(request: Request, response: Response):
-    body = await request.json()
-    session_id = body.get("session_id")
-    
-    if not session_id:
-        raise HTTPException(status_code=400, detail="Session ID required")
-    
-    # Call Emergent Auth to get session data
+
+@api_router.get("/auth/google")
+async def google_login():
+    """
+    Step 1: Redirect user to Google OAuth.
+    Frontend calls: window.location.href = 'https://your-api.onrender.com/api/auth/google'
+    """
+    if not GOOGLE_CLIENT_ID:
+        raise HTTPException(status_code=500, detail="Google OAuth not configured. Set GOOGLE_CLIENT_ID env var.")
+
+    google_auth_url = (
+        "https://accounts.google.com/o/oauth2/v2/auth"
+        f"?client_id={GOOGLE_CLIENT_ID}"
+        f"&redirect_uri={GOOGLE_REDIRECT_URI}"
+        "&response_type=code"
+        "&scope=openid%20email%20profile"
+        "&access_type=offline"
+        "&prompt=consent"
+    )
+    return RedirectResponse(url=google_auth_url)
+
+
+@api_router.get("/auth/google/callback")
+async def google_callback(code: str, response: Response, error: Optional[str] = None):
+    """
+    Step 2: Google redirects back here with a 'code'.
+    We exchange it for user info, create/find the user, issue JWT, redirect to frontend.
+    """
+    if error:
+        return RedirectResponse(url=f"{FRONTEND_URL}/login?error=google_auth_failed")
+
+    if not code:
+        return RedirectResponse(url=f"{FRONTEND_URL}/login?error=no_code")
+
+    # Exchange authorization code for access token
     try:
-        resp = requests.get(
-            "https://demobackend.emergentagent.com/auth/v1/env/oauth/session-data",
-            headers={"X-Session-ID": session_id},
-            timeout=30
+        token_response = requests.post(
+            "https://oauth2.googleapis.com/token",
+            data={
+                "code": code,
+                "client_id": GOOGLE_CLIENT_ID,
+                "client_secret": GOOGLE_CLIENT_SECRET,
+                "redirect_uri": GOOGLE_REDIRECT_URI,
+                "grant_type": "authorization_code",
+            },
+            timeout=10
         )
-        resp.raise_for_status()
-        session_data = resp.json()
+        token_response.raise_for_status()
+        token_data = token_response.json()
     except Exception as e:
-        logger.error(f"OAuth session error: {e}")
-        raise HTTPException(status_code=400, detail="Invalid session")
-    
-    email = session_data.get("email", "").lower()
-    name = session_data.get("name", "")
-    picture = session_data.get("picture", "")
-    session_token = session_data.get("session_token")
-    
+        logger.error(f"Google token exchange failed: {e}")
+        return RedirectResponse(url=f"{FRONTEND_URL}/login?error=token_exchange_failed")
+
+    # Get user info from Google
+    try:
+        userinfo_response = requests.get(
+            "https://www.googleapis.com/oauth2/v2/userinfo",
+            headers={"Authorization": f"Bearer {token_data['access_token']}"},
+            timeout=10
+        )
+        userinfo_response.raise_for_status()
+        google_user = userinfo_response.json()
+    except Exception as e:
+        logger.error(f"Google userinfo fetch failed: {e}")
+        return RedirectResponse(url=f"{FRONTEND_URL}/login?error=userinfo_failed")
+
+    email = google_user.get("email", "").lower()
+    name = google_user.get("name", "")
+    picture = google_user.get("picture", "")
+    google_id = google_user.get("id", "")
+
+    if not email:
+        return RedirectResponse(url=f"{FRONTEND_URL}/login?error=no_email")
+
     # Find or create user
     user = await db.users.find_one({"email": email})
     if not user:
         user_id = f"user_{uuid.uuid4().hex[:12]}"
-        user_doc = {
+        await db.users.insert_one({
             "user_id": user_id,
             "email": email,
             "name": name,
-            "role": "student",  # Default role for new OAuth users
+            "role": "student",
             "picture": picture,
+            "google_id": google_id,
             "created_at": datetime.now(timezone.utc).isoformat()
-        }
-        await db.users.insert_one(user_doc)
-        
-        # Create student profile
-        student_doc = {
+        })
+        await db.students.insert_one({
             "id": f"std_{uuid.uuid4().hex[:8]}",
             "user_id": user_id,
             "student_id": f"STD{uuid.uuid4().hex[:6].upper()}",
             "grade": "",
             "section": "",
             "created_at": datetime.now(timezone.utc).isoformat()
-        }
-        await db.students.insert_one(student_doc)
+        })
     else:
         user_id = user.get("user_id", str(user.get("_id")))
-        # Update picture if changed
+        update_fields = {}
         if picture and picture != user.get("picture"):
-            await db.users.update_one({"email": email}, {"$set": {"picture": picture}})
-    
-    # Store session
-    await db.user_sessions.update_one(
-        {"user_id": user_id},
-        {
-            "$set": {
-                "session_token": session_token,
-                "expires_at": (datetime.now(timezone.utc) + timedelta(days=7)).isoformat(),
-                "created_at": datetime.now(timezone.utc).isoformat()
-            }
-        },
-        upsert=True
+            update_fields["picture"] = picture
+        if google_id and google_id != user.get("google_id"):
+            update_fields["google_id"] = google_id
+        if update_fields:
+            await db.users.update_one({"email": email}, {"$set": update_fields})
+
+    user = await db.users.find_one({"user_id": user_id}, {"_id": 0, "password_hash": 0})
+
+    access_token = create_access_token(user_id, email, user.get("role", "student"))
+    refresh_token_val = create_refresh_token(user_id)
+
+    # Redirect to frontend with tokens
+    redirect_url = (
+        f"{FRONTEND_URL}/auth/callback"
+        f"?access_token={access_token}"
+        f"&refresh_token={refresh_token_val}"
+        f"&user_id={user_id}"
+        f"&role={user.get('role', 'student')}"
     )
+
+    resp = RedirectResponse(url=redirect_url)
+    resp.set_cookie(key="access_token", value=access_token, httponly=True, secure=True, samesite="none", max_age=3600, path="/")
+    resp.set_cookie(key="refresh_token", value=refresh_token_val, httponly=True, secure=True, samesite="none", max_age=604800, path="/")
+    return resp
+
+
+@api_router.get("/auth/google/url")
+async def get_google_auth_url():
+    """Returns the Google OAuth URL for the frontend."""
+    if not GOOGLE_CLIENT_ID:
+        raise HTTPException(status_code=500, detail="Google OAuth not configured")
+
+    google_auth_url = (
+        "https://accounts.google.com/o/oauth2/v2/auth"
+        f"?client_id={GOOGLE_CLIENT_ID}"
+        f"&redirect_uri={GOOGLE_REDIRECT_URI}"
+        "&response_type=code"
+        "&scope=openid%20email%20profile"
+        "&access_type=offline"
+        "&prompt=consent"
+    )
+    return {"url": google_auth_url}
+
+
+# @api_router.post("/auth/session")
+# async def create_session(request: Request, response: Response):
+#     body = await request.json()
+#     session_id = body.get("session_id")
     
-    response.set_cookie(key="session_token", value=session_token, httponly=True, secure=True, samesite="none", max_age=604800, path="/")
+#     if not session_id:
+#         raise HTTPException(status_code=400, detail="Session ID required")
     
-    user_data = await db.users.find_one({"user_id": user_id}, {"_id": 0, "password_hash": 0})
+#     # Call Emergent Auth to get session data
+#     try:
+#         resp = requests.get(
+#             "https://demobackend.emergentagent.com/auth/v1/env/oauth/session-data",
+#             headers={"X-Session-ID": session_id},
+#             timeout=30
+#         )
+#         resp.raise_for_status()
+#         session_data = resp.json()
+#     except Exception as e:
+#         logger.error(f"OAuth session error: {e}")
+#         raise HTTPException(status_code=400, detail="Invalid session")
     
-    # Create JWT tokens for header-based auth
-    access_token = create_access_token(user_id, email, user_data.get("role", "student"))
-    refresh_token = create_refresh_token(user_id)
+#     email = session_data.get("email", "").lower()
+#     name = session_data.get("name", "")
+#     picture = session_data.get("picture", "")
+#     session_token = session_data.get("session_token")
     
-    response.set_cookie(key="access_token", value=access_token, httponly=True, secure=True, samesite="none", max_age=3600, path="/")
-    response.set_cookie(key="refresh_token", value=refresh_token, httponly=True, secure=True, samesite="none", max_age=604800, path="/")
+#     # Find or create user
+#     user = await db.users.find_one({"email": email})
+#     if not user:
+#         user_id = f"user_{uuid.uuid4().hex[:12]}"
+#         user_doc = {
+#             "user_id": user_id,
+#             "email": email,
+#             "name": name,
+#             "role": "student",  # Default role for new OAuth users
+#             "picture": picture,
+#             "created_at": datetime.now(timezone.utc).isoformat()
+#         }
+#         await db.users.insert_one(user_doc)
+        
+#         # Create student profile
+#         student_doc = {
+#             "id": f"std_{uuid.uuid4().hex[:8]}",
+#             "user_id": user_id,
+#             "student_id": f"STD{uuid.uuid4().hex[:6].upper()}",
+#             "grade": "",
+#             "section": "",
+#             "created_at": datetime.now(timezone.utc).isoformat()
+#         }
+#         await db.students.insert_one(student_doc)
+#     else:
+#         user_id = user.get("user_id", str(user.get("_id")))
+#         # Update picture if changed
+#         if picture and picture != user.get("picture"):
+#             await db.users.update_one({"email": email}, {"$set": {"picture": picture}})
     
-    return {
-        **user_data,
-        "access_token": access_token,
-        "refresh_token": refresh_token
-    }
+#     # Store session
+#     await db.user_sessions.update_one(
+#         {"user_id": user_id},
+#         {
+#             "$set": {
+#                 "session_token": session_token,
+#                 "expires_at": (datetime.now(timezone.utc) + timedelta(days=7)).isoformat(),
+#                 "created_at": datetime.now(timezone.utc).isoformat()
+#             }
+#         },
+#         upsert=True
+#     )
+    
+#     response.set_cookie(key="session_token", value=session_token, httponly=True, secure=True, samesite="none", max_age=604800, path="/")
+    
+#     user_data = await db.users.find_one({"user_id": user_id}, {"_id": 0, "password_hash": 0})
+    
+#     # Create JWT tokens for header-based auth
+#     access_token = create_access_token(user_id, email, user_data.get("role", "student"))
+#     refresh_token = create_refresh_token(user_id)
+    
+#     response.set_cookie(key="access_token", value=access_token, httponly=True, secure=True, samesite="none", max_age=3600, path="/")
+#     response.set_cookie(key="refresh_token", value=refresh_token, httponly=True, secure=True, samesite="none", max_age=604800, path="/")
+    
+#     return {
+#         **user_data,
+#         "access_token": access_token,
+#         "refresh_token": refresh_token
+#     }
 
 # ================== ADMIN ENDPOINTS ==================
 

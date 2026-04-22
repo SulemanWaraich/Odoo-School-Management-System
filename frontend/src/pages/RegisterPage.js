@@ -64,7 +64,8 @@ const RegisterPage = () => {
   };
 
   const handleGoogleRegister = () => {
-    loginWithGoogle();
+
+     window.location.href = `${process.env.REACT_APP_API_URL}/api/auth/google`;
   };
 
   return (
