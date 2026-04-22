@@ -1,68 +1,71 @@
 // src/pages/AuthCallback.jsx
-// Handles the redirect from backend after Google OAuth.
-// Backend sends: /auth/callback?access_token=...&refresh_token=...&role=...&user_id=...
-
 import React, { useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useAuth } from '../contexts/AuthContext';
 import { Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
+import axios from 'axios';
 
 const AuthCallback = () => {
   const navigate = useNavigate();
-  const { setUserFromTokens } = useAuth(); // ✅ We'll use this to update auth state
   const hasProcessed = useRef(false);
 
   useEffect(() => {
-    // Prevent double execution in StrictMode
     if (hasProcessed.current) return;
     hasProcessed.current = true;
 
     const processCallback = async () => {
-      // ✅ Backend sends tokens as QUERY PARAMS (?key=value), not hash (#key=value)
-      // server.py: f"{FRONTEND_URL}/auth/callback?access_token=...&refresh_token=...&role=..."
+      // ✅ Read query params sent by backend
       const params = new URLSearchParams(window.location.search);
       const accessToken = params.get('access_token');
       const refreshToken = params.get('refresh_token');
       const role = params.get('role');
       const error = params.get('error');
 
-      // Handle error redirected from backend
       if (error) {
         toast.error(`Authentication failed: ${error}`);
         navigate('/login', { replace: true });
         return;
       }
 
-      // Validate we got tokens
       if (!accessToken) {
-        toast.error('Invalid authentication response');
+        toast.error('No token received');
         navigate('/login', { replace: true });
         return;
       }
 
-      try {
-        // ✅ Store tokens so API calls can use them
-        localStorage.setItem('access_token', accessToken);
-        localStorage.setItem('refresh_token', refreshToken);
+      // ✅ Store tokens in localStorage
+      localStorage.setItem('access_token', accessToken);
+      if (refreshToken) localStorage.setItem('refresh_token', refreshToken);
 
-        // ✅ Tell AuthContext about the new user by fetching /api/auth/me
-        await setUserFromTokens(accessToken);
+      try {
+        // ✅ Fetch user data from backend using the token
+        const response = await axios.get(
+          `${process.env.REACT_APP_API_URL}/api/auth/me`,
+          { headers: { Authorization: `Bearer ${accessToken}` } }
+        );
+
+        const userData = response.data;
+
+        // ✅ Store user in localStorage so AuthContext can pick it up on reload
+        localStorage.setItem('user', JSON.stringify(userData));
 
         toast.success('Login successful!');
 
-        // ✅ Redirect based on role
+        // ✅ Force a full page redirect so AuthContext re-initializes with new token
         const routes = { admin: '/admin', teacher: '/teacher', student: '/student' };
-        navigate(routes[role] || '/student', { replace: true });
-      } catch (error) {
-        console.error('OAuth callback error:', error);
+        window.location.href = routes[userData.role] || '/student';
+
+      } catch (err) {
+        console.error('Failed to fetch user:', err);
         toast.error('Authentication failed. Please try again.');
+        localStorage.removeItem('access_token');
+        localStorage.removeItem('refresh_token');
         navigate('/login', { replace: true });
       }
     };
 
     processCallback();
-  }, [navigate, setUserFromTokens]);
+  }, [navigate]);
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-slate-50">

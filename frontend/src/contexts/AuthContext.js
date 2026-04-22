@@ -1,9 +1,10 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 
-const API_URL = process.env.REACT_APP_BACKEND_URL;
+// ✅ FIXED: Use REACT_APP_API_URL (not REACT_APP_BACKEND_URL)
+const API_URL = process.env.REACT_APP_API_URL;
 
-// Configure axios defaults - NO withCredentials, use Authorization header instead
+// Configure axios defaults
 axios.defaults.withCredentials = false;
 
 // Axios interceptor to add Authorization header to all requests
@@ -23,7 +24,6 @@ axios.interceptors.response.use(
   (response) => response,
   async (error) => {
     if (error.response?.status === 401) {
-      // Try to refresh token
       const refreshToken = localStorage.getItem('refresh_token');
       if (refreshToken && !error.config._retry) {
         error.config._retry = true;
@@ -37,7 +37,6 @@ axios.interceptors.response.use(
             return axios(error.config);
           }
         } catch (refreshError) {
-          // Refresh failed, clear tokens
           localStorage.removeItem('access_token');
           localStorage.removeItem('refresh_token');
         }
@@ -62,8 +61,9 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
 
   const checkAuth = useCallback(async () => {
-    // CRITICAL: Skip auth check if returning from OAuth callback
-    if (window.location.hash?.includes('session_id=')) {
+    // ✅ FIXED: Skip auth check if we're on the OAuth callback page
+    // Previously checked for hash (#session_id=) but now backend uses query params
+    if (window.location.pathname === '/auth/callback') {
       setLoading(false);
       return;
     }
@@ -78,7 +78,6 @@ export const AuthProvider = ({ children }) => {
       const response = await axios.get(`${API_URL}/api/auth/me`);
       setUser(response.data);
     } catch (error) {
-      // Token invalid, clear storage
       localStorage.removeItem('access_token');
       localStorage.removeItem('refresh_token');
       setUser(null);
@@ -93,30 +92,24 @@ export const AuthProvider = ({ children }) => {
 
   const login = async (email, password) => {
     const response = await axios.post(`${API_URL}/api/auth/login`, { email, password });
-    
-    // Store tokens if returned in response body
     if (response.data.access_token) {
       localStorage.setItem('access_token', response.data.access_token);
     }
     if (response.data.refresh_token) {
       localStorage.setItem('refresh_token', response.data.refresh_token);
     }
-    
     setUser(response.data);
     return response.data;
   };
 
   const register = async (email, password, name, role) => {
     const response = await axios.post(`${API_URL}/api/auth/register`, { email, password, name, role });
-    
-    // Store tokens if returned in response body
     if (response.data.access_token) {
       localStorage.setItem('access_token', response.data.access_token);
     }
     if (response.data.refresh_token) {
       localStorage.setItem('refresh_token', response.data.refresh_token);
     }
-    
     setUser(response.data);
     return response.data;
   };
@@ -132,36 +125,32 @@ export const AuthProvider = ({ children }) => {
     setUser(null);
   };
 
+  // ✅ FIXED: Redirects to your actual backend, not emergentagent
   const loginWithGoogle = () => {
-    const redirectUrl = window.location.origin + '/auth/callback';
-    window.location.href = `https://auth.emergentagent.com/?redirect=${encodeURIComponent(redirectUrl)}`;
+    window.location.href = `${API_URL}/api/auth/google`;
   };
 
+  // ✅ FIXED: Uses full API_URL, not relative path
+  const setUserFromTokens = async (accessToken) => {
+    const response = await axios.get(`${API_URL}/api/auth/me`, {
+      headers: { Authorization: `Bearer ${accessToken}` }
+    });
+    setUser(response.data);
+    return response.data;
+  };
+
+  // Kept for backwards compatibility but no longer used
   const handleOAuthCallback = async (sessionId) => {
     const response = await axios.post(`${API_URL}/api/auth/session`, { session_id: sessionId });
-    
     if (response.data.access_token) {
       localStorage.setItem('access_token', response.data.access_token);
     }
     if (response.data.refresh_token) {
       localStorage.setItem('refresh_token', response.data.refresh_token);
     }
-    
     setUser(response.data);
     return response.data;
   };
-
-  // Add this function inside your AuthContext provider
-const setUserFromTokens = async (accessToken) => {
-  const response = await axios.get('/api/auth/me', {
-    headers: { Authorization: `Bearer ${accessToken}` }
-  });
-  setUser(response.data); // update the user state in context
-  return response.data;
-};
-
-// Make sure to expose it in the context value:
-// value={{ user, login, logout, setUserFromTokens, ... }}
 
   const value = {
     user,
