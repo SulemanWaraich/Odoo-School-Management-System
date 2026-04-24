@@ -265,6 +265,24 @@ class AnnouncementCreate(BaseModel):
     target_role: str = "all"  # all, student, teacher
     course_id: Optional[str] = None
 
+class GoogleCalendarIntegration(BaseModel):
+    """Model for storing Google Calendar integration details"""
+    user_id: str
+    access_token: str
+    refresh_token: Optional[str] = None
+    token_expiry: Optional[str] = None
+    calendar_id: Optional[str] = None
+    is_enabled: bool = True
+    created_at: str = None
+    updated_at: str = None
+
+class TimetableEventSync(BaseModel):
+    """Model for tracking synced timetable events"""
+    timetable_id: str
+    google_event_id: Optional[str] = None
+    is_synced: bool = False
+    synced_at: Optional[str] = None
+
 # ================== AUTH HELPERS ==================
 
 def hash_password(password: str) -> str:
@@ -739,6 +757,101 @@ async def get_google_auth_url():
 #         "access_token": access_token,
 #         "refresh_token": refresh_token
 #     }
+
+# ================== USER PROFILE ENDPOINTS ==================
+
+@api_router.get("/users/profile")
+async def get_user_profile(request: Request):
+    """Get the current user's complete profile information"""
+    user = await get_current_user(request)
+    
+    profile_data = {
+        "user_id": user["user_id"],
+        "email": user["email"],
+        "name": user["name"],
+        "role": user["role"],
+        "picture": user.get("picture"),
+        "created_at": user.get("created_at"),
+        "updated_at": user.get("updated_at")
+    }
+    
+    # Add role-specific details
+    if user["role"] == "student":
+        student = await db.students.find_one({"user_id": user["user_id"]}, {"_id": 0})
+        if student:
+            profile_data.update({
+                "student_id": student.get("student_id"),
+                "grade": student.get("grade"),
+                "section": student.get("section"),
+                "parent_contact": student.get("parent_contact"),
+                "address": student.get("address")
+            })
+    elif user["role"] == "teacher":
+        teacher = await db.teachers.find_one({"user_id": user["user_id"]}, {"_id": 0})
+        if teacher:
+            profile_data.update({
+                "employee_id": teacher.get("employee_id"),
+                "department": teacher.get("department"),
+                "qualification": teacher.get("qualification"),
+                "phone": teacher.get("phone")
+            })
+    
+    return profile_data
+
+@api_router.put("/users/profile")
+async def update_user_profile(request: Request):
+    """Update the current user's profile information"""
+    user = await get_current_user(request)
+    body = await request.json()
+    
+    # Update user fields
+    user_update = {}
+    if "name" in body and body["name"]:
+        user_update["name"] = body["name"]
+    if "picture" in body:
+        user_update["picture"] = body["picture"]
+    
+    user_update["updated_at"] = datetime.now(timezone.utc).isoformat()
+    
+    if user_update:
+        await db.users.update_one({"user_id": user["user_id"]}, {"$set": user_update})
+    
+    # Update role-specific fields
+    if user["role"] == "student":
+        student_update = {}
+        if "grade" in body:
+            student_update["grade"] = body["grade"]
+        if "section" in body:
+            student_update["section"] = body["section"]
+        if "parent_contact" in body:
+            student_update["parent_contact"] = body["parent_contact"]
+        if "address" in body:
+            student_update["address"] = body["address"]
+        
+        if student_update:
+            student_update["updated_at"] = datetime.now(timezone.utc).isoformat()
+            await db.students.update_one(
+                {"user_id": user["user_id"]},
+                {"$set": student_update}
+            )
+    
+    elif user["role"] == "teacher":
+        teacher_update = {}
+        if "phone" in body:
+            teacher_update["phone"] = body["phone"]
+        if "department" in body:
+            teacher_update["department"] = body["department"]
+        if "qualification" in body:
+            teacher_update["qualification"] = body["qualification"]
+        
+        if teacher_update:
+            teacher_update["updated_at"] = datetime.now(timezone.utc).isoformat()
+            await db.teachers.update_one(
+                {"user_id": user["user_id"]},
+                {"$set": teacher_update}
+            )
+    
+    return {"message": "Profile updated successfully"}
 
 # ================== ADMIN ENDPOINTS ==================
 
@@ -3056,6 +3169,291 @@ class TimetableEntryCreate(BaseModel):
     room: Optional[str] = None
     term_id: Optional[str] = None
 
+# ================== GOOGLE CALENDAR INTEGRATION ==================
+
+@api_router.get("/calendar/integration/url")
+async def get_google_calendar_auth_url(request: Request):
+    """Get Google OAuth URL for calendar integration"""
+    user = await get_current_user(request)
+    
+    if not GOOGLE_CLIENT_ID:
+        raise HTTPException(status_code=500, detail="Google Calendar not configured")
+    
+    # For calendar, we need additional scopes
+    scopes = [
+        "https://www.googleapis.com/auth/calendar",
+        "https://www.googleapis.com/auth/calendar.events"
+    ]
+    scope_string = "%20".join(scopes)
+    
+    google_auth_url = (
+        "https://accounts.google.com/o/oauth2/v2/auth"
+        f"?client_id={GOOGLE_CLIENT_ID}"
+        f"&redirect_uri={GOOGLE_REDIRECT_URI.replace('/auth/google/callback', '/api/calendar/integration/callback')}"
+        "&response_type=code"
+        f"&scope={scope_string}"
+        "&access_type=offline"
+        "&prompt=consent"
+        f"&state={user['user_id']}"
+    )
+    
+    return {"url": google_auth_url}
+
+@api_router.get("/calendar/integration/callback")
+async def google_calendar_callback(code: str, request: Request, state: str, error: Optional[str] = None):
+    """Handle Google OAuth callback for calendar integration"""
+    # user = await get_current_user(request)
+    user_id = state
+
+    if error:
+        raise HTTPException(status_code=400, detail="Google authorization failed")
+    
+    if not code:
+        raise HTTPException(status_code=400, detail="No authorization code provided")
+    
+    # Exchange code for tokens
+    try:
+        token_response = requests.post(
+            "https://oauth2.googleapis.com/token",
+            data={
+                "code": code,
+                "client_id": GOOGLE_CLIENT_ID,
+                "client_secret": GOOGLE_CLIENT_SECRET,
+                "redirect_uri": GOOGLE_REDIRECT_URI.replace('/auth/google/callback', '/api/calendar/integration/callback'),
+                "grant_type": "authorization_code",
+            },
+            timeout=10
+        )
+        token_response.raise_for_status()
+        token_data = token_response.json()
+    except Exception as e:
+        logger.error(f"Google Calendar token exchange failed: {e}")
+        raise HTTPException(status_code=400, detail="Token exchange failed")
+    
+    # Get primary calendar ID
+    try:
+        calendar_response = requests.get(
+            "https://www.googleapis.com/calendar/v3/calendars/primary",
+            headers={"Authorization": f"Bearer {token_data['access_token']}"},
+            timeout=10
+        )
+        calendar_response.raise_for_status()
+        calendar_data = calendar_response.json()
+        calendar_id = calendar_data.get("id", "primary")
+    except Exception as e:
+        logger.error(f"Failed to get calendar info: {e}")
+        calendar_id = "primary"
+    
+    # Store integration
+    integration_doc = {
+        "user_id": user_id,
+        "access_token": token_data["access_token"],
+        "refresh_token": token_data.get("refresh_token"),
+        "token_expiry": (datetime.now(timezone.utc) + timedelta(seconds=token_data.get("expires_in", 3600))).isoformat(),
+        "calendar_id": calendar_id,
+        "is_enabled": True,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "updated_at": datetime.now(timezone.utc).isoformat()
+    }
+    
+    await db.google_calendar_integrations.update_one(
+        {"user_id": user_id},
+        {"$set": integration_doc},
+        upsert=True
+    )
+    
+    logger.info(f"Google Calendar integrated for user {user_id}")
+
+    frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
+    return RedirectResponse(url=f"{frontend_url}/timetable?calendar=connected")
+
+@api_router.get("/calendar/integration/status")
+async def get_calendar_integration_status(request: Request):
+    """Check if user has Google Calendar integrated"""
+    user = await get_current_user(request)
+    
+    integration = await db.google_calendar_integrations.find_one(
+        {"user_id": user["user_id"]},
+        {"_id": 0, "access_token": 0, "refresh_token": 0}
+    )
+    
+    if not integration:
+        return {"is_integrated": False, "calendar_id": None}
+    
+    return {
+        "is_integrated": integration.get("is_enabled", False),
+        "calendar_id": integration.get("calendar_id"),
+        "created_at": integration.get("created_at")
+    }
+
+@api_router.post("/calendar/integration/disconnect")
+async def disconnect_calendar(request: Request):
+    """Disconnect Google Calendar integration"""
+    user = await get_current_user(request)
+    
+    await db.google_calendar_integrations.update_one(
+        {"user_id": user["user_id"]},
+        {"$set": {"is_enabled": False}}
+    )
+    
+    return {"message": "Google Calendar disconnected"}
+
+async def get_valid_access_token(integration: dict) -> str:
+    """Refresh token if expired"""
+    token_expiry = datetime.fromisoformat(integration["token_expiry"])
+    
+    # If token expires in less than 5 minutes, refresh it
+    if datetime.now(timezone.utc) >= token_expiry - timedelta(minutes=5):
+        refresh_response = requests.post(
+            "https://oauth2.googleapis.com/token",
+            data={
+                "client_id": GOOGLE_CLIENT_ID,
+                "client_secret": GOOGLE_CLIENT_SECRET,
+                "refresh_token": integration["refresh_token"],
+                "grant_type": "refresh_token"
+            },
+            timeout=10
+        )
+        refresh_response.raise_for_status()
+        new_token_data = refresh_response.json()
+        
+        # Update DB with new token
+        await db.google_calendar_integrations.update_one(
+            {"user_id": integration["user_id"]},
+            {"$set": {
+                "access_token": new_token_data["access_token"],
+                "token_expiry": (datetime.now(timezone.utc) + timedelta(seconds=new_token_data.get("expires_in", 3600))).isoformat()
+            }}
+        )
+        return new_token_data["access_token"]
+    
+    return integration["access_token"]
+
+
+@api_router.post("/calendar/sync/timetable/{timetable_id}")
+async def sync_timetable_to_calendar(timetable_id: str, request: Request):
+    user = await get_current_user(request)
+    
+    integration = await db.google_calendar_integrations.find_one(
+        {"user_id": user["user_id"], "is_enabled": True}
+    )
+    
+    if not integration:
+        raise HTTPException(status_code=400, detail="Google Calendar not integrated")
+
+    # ✅ ADD THIS — print exact Google error
+    access_token = await get_valid_access_token(integration)
+    
+    timetable = await db.timetable.find_one({"id": timetable_id}, {"_id": 0})
+    if not timetable:
+        raise HTTPException(status_code=404, detail="Timetable entry not found")
+
+    course = await db.courses.find_one({"id": timetable["course_id"]}, {"_id": 0})
+    if not course:
+        raise HTTPException(status_code=404, detail="Course not found")
+
+    rrule_days = ['MO', 'TU', 'WE', 'TH', 'FR', 'SA', 'SU']
+    rrule_day = rrule_days[timetable["day_of_week"] % 7]
+
+    event = {
+        "summary": f"{course['name']} ({course['code']})",
+        "description": f"Room: {timetable.get('room', 'TBD')}",
+        "start": {
+            "dateTime": f"2024-01-01T{timetable['start_time']}:00",
+            "timeZone": "UTC"
+        },
+        "end": {
+            "dateTime": f"2024-01-01T{timetable['end_time']}:00",
+            "timeZone": "UTC"
+        },
+        "recurrence": [f"RRULE:FREQ=WEEKLY;BYDAY={rrule_day}"]
+    }
+
+    response = requests.post(
+        f"https://www.googleapis.com/calendar/v3/calendars/{integration['calendar_id']}/events",
+        headers={"Authorization": f"Bearer {access_token}"},
+        json=event,
+        timeout=10
+    )
+    
+    # ✅ Print exact Google error to your terminal
+    print("Google API status:", response.status_code)
+    print("Google API response:", response.text)
+    
+    if not response.ok:
+        raise HTTPException(status_code=400, detail=f"Google error: {response.text}")
+    
+    event_data = response.json()
+
+    await db.timetable.update_one(
+        {"id": timetable_id},
+        {"$set": {
+            "google_event_id": event_data.get("id"),
+            "is_synced_to_calendar": True,
+            "synced_at": datetime.now(timezone.utc).isoformat()
+        }}
+    )
+
+    return {"message": "Timetable synced to Google Calendar", "google_event_id": event_data.get("id")}
+
+@api_router.get("/calendar/events")
+async def get_calendar_events(request: Request, days_ahead: int = 30):
+    """Fetch upcoming events from Google Calendar"""
+    user = await get_current_user(request)
+    
+    integration = await db.google_calendar_integrations.find_one(
+        {"user_id": user["user_id"], "is_enabled": True}
+    )
+    
+    if not integration:
+        raise HTTPException(status_code=400, detail="Google Calendar not integrated")
+    
+    # Get events for the next N days
+    now = datetime.now(timezone.utc)
+    later = now + timedelta(days=days_ahead)
+    
+    try:
+        response = requests.get(
+            f"https://www.googleapis.com/calendar/v3/calendars/{integration['calendar_id']}/events",
+            headers={"Authorization": f"Bearer {integration['access_token']}"},
+            params={
+                "timeMin": now.isoformat(),
+                "timeMax": later.isoformat(),
+                "maxResults": 100,
+                "orderBy": "startTime",
+                "singleEvents": True
+            },
+            timeout=10
+        )
+        response.raise_for_status()
+        events_data = response.json()
+    except Exception as e:
+        logger.error(f"Failed to fetch Google Calendar events: {e}")
+        raise HTTPException(status_code=400, detail="Failed to fetch calendar events")
+    
+    events = []
+    for event in events_data.get("items", []):
+        events.append({
+            "id": event.get("id"),
+            "title": event.get("summary"),
+            "description": event.get("description"),
+            "start": event.get("start", {}).get("dateTime") or event.get("start", {}).get("date"),
+            "end": event.get("end", {}).get("dateTime") or event.get("end", {}).get("date"),
+            "location": event.get("location")
+        })
+    
+    return {"events": events, "count": len(events)}
+
+# ================== TIMETABLE / SCHEDULING MODULE ==================
+
+class TimetableEntryCreate(BaseModel):
+    course_id: str
+    day_of_week: int  # 0=Monday, 6=Sunday
+    start_time: str  # HH:MM format
+    end_time: str  # HH:MM format
+    room: Optional[str] = None
+    term_id: Optional[str] = None
+
 @api_router.get("/timetable")
 async def get_timetable(
     request: Request,
@@ -3669,6 +4067,9 @@ async def startup():
     await db.timetable.create_index([("day_of_week", 1), ("start_time", 1)])
     await db.timetable.create_index("teacher_id")
     await db.timetable.create_index("course_id")
+    
+    # Google Calendar integration indexes
+    await db.google_calendar_integrations.create_index("user_id", unique=True)
    
     
     # Seed admin user

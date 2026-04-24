@@ -201,6 +201,14 @@ export const DashboardLayout = ({ children, title }) => {
                   {user?.email}
                 </DropdownMenuItem>
                 <DropdownMenuItem 
+                  onClick={() => navigate('/profile')}
+                  className="cursor-pointer"
+                  data-testid="profile-btn"
+                >
+                  <UserCog className="w-4 h-4 mr-2" />
+                  My Profile
+                </DropdownMenuItem>
+                <DropdownMenuItem 
                   onClick={handleLogout}
                   className="text-red-600 cursor-pointer"
                   data-testid="logout-btn"

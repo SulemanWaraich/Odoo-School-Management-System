@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { DashboardLayout } from '../../components/DashboardLayout';
+import GoogleCalendarIntegration from '../../components/GoogleCalendarIntegration';
+import CalendarSyncButton from '../../components/CalendarSyncButton';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
@@ -10,13 +12,163 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '.
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select';
 import { Badge } from '../../components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../../components/ui/tabs';
-import { Calendar, Clock, MapPin, Plus, Pencil, Trash2, AlertTriangle } from 'lucide-react';
+import { Calendar, Clock, MapPin, Plus, Pencil, Trash2, AlertTriangle, ExternalLink, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 const TIME_SLOTS = ['08:00', '09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00'];
+const SLOT_HEIGHT = 80;
+
+const normalizeTime = (t) => {
+  if (!t) return '00:00';
+  const str = t.substring(0, 5);
+  return str.length === 4 ? `0${str}` : str;
+};
+
+const timeToMinutes = (t) => {
+  const [h, m] = normalizeTime(t).split(':').map(Number);
+  return h * 60 + m;
+};
+
+// ── Google Events Section ─────────────────────────────────────────────────────
+
+const GoogleEventsSection = () => {
+  const [events, setEvents] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [isIntegrated, setIsIntegrated] = useState(false);
+
+  useEffect(() => {
+    checkAndFetch();
+  }, []);
+
+  const checkAndFetch = async () => {
+    try {
+      const statusRes = await axios.get(`${API_URL}/api/calendar/integration/status`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('access_token')}` }
+      });
+      setIsIntegrated(statusRes.data.is_integrated);
+      if (statusRes.data.is_integrated) {
+        await fetchEvents();
+      }
+    } catch (err) {
+      setIsIntegrated(false);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchEvents = async () => {
+    setLoading(true);
+    try {
+      const res = await axios.get(`${API_URL}/api/calendar/events?days_ahead=30`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('access_token')}` }
+      });
+      setEvents(res.data.events || []);
+    } catch (err) {
+      toast.error('Failed to fetch Google Calendar events');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const formatDateTime = (isoString) => {
+    if (!isoString) return '—';
+    if (!isoString.includes('T')) {
+      return new Date(isoString + 'T00:00:00').toLocaleDateString('en-US', {
+        weekday: 'short', month: 'short', day: 'numeric'
+      });
+    }
+    return new Date(isoString).toLocaleString('en-US', {
+      weekday: 'short', month: 'short', day: 'numeric',
+      hour: '2-digit', minute: '2-digit'
+    });
+  };
+
+  const isAllDay = (event) => event.start && !event.start.includes('T');
+
+  if (!isIntegrated) {
+    return (
+      <div className="text-center py-12 text-slate-500">
+        <Calendar className="w-12 h-12 mx-auto mb-4 text-slate-300" />
+        <p className="font-medium text-slate-600">Google Calendar not connected</p>
+        <p className="text-sm mt-1">Connect your Google Calendar in the "Google Calendar" tab to see your upcoming events here.</p>
+      </div>
+    );
+  }
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <div className="w-6 h-6 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  if (events.length === 0) {
+    return (
+      <div className="text-center py-12 text-slate-500">
+        <Calendar className="w-12 h-12 mx-auto mb-4 text-slate-300" />
+        <p className="font-medium">No upcoming events</p>
+        <p className="text-sm mt-1">Your Google Calendar has no events in the next 30 days.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-2">
+          <Badge className="bg-indigo-100 text-indigo-700">Next 30 days</Badge>
+          <span className="text-sm text-slate-500">{events.length} event{events.length !== 1 ? 's' : ''}</span>
+        </div>
+        <Button variant="outline" size="sm" onClick={fetchEvents} className="flex items-center gap-2">
+          <RefreshCw className="w-4 h-4" />
+          Refresh
+        </Button>
+      </div>
+      {events.map((event) => (
+        <div
+          key={event.id}
+          className="flex items-start gap-4 p-3 rounded-lg border border-slate-100 bg-slate-50 hover:bg-indigo-50 hover:border-indigo-200 transition-colors"
+        >
+          <div className="w-3 h-3 rounded-full bg-indigo-500 flex-shrink-0 mt-1" />
+          <div className="flex-1 min-w-0">
+            <p className="font-medium text-slate-900 truncate">{event.title || '(No title)'}</p>
+            <div className="flex items-center gap-1 text-sm text-slate-500 mt-1">
+              <Clock className="w-3 h-3 flex-shrink-0" />
+              {isAllDay(event)
+                ? <span>All day · {formatDateTime(event.start)}</span>
+                : <span>{formatDateTime(event.start)} → {formatDateTime(event.end)}</span>
+              }
+            </div>
+            {event.location && (
+              <div className="flex items-center gap-1 text-sm text-slate-500 mt-0.5">
+                <MapPin className="w-3 h-3 flex-shrink-0" />
+                <span className="truncate">{event.location}</span>
+              </div>
+            )}
+            {event.description && (
+              <p className="text-xs text-slate-400 mt-1 truncate">{event.description}</p>
+            )}
+          </div>
+          <a
+            href="https://calendar.google.com/calendar/r"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-slate-400 hover:text-indigo-600 flex-shrink-0"
+            title="Open in Google Calendar"
+          >
+            <ExternalLink className="w-4 h-4" />
+          </a>
+        </div>
+      ))}
+    </div>
+  );
+};
+
+// ── Main Component ────────────────────────────────────────────────────────────
 
 const TimetableManagement = () => {
   const [loading, setLoading] = useState(true);
@@ -35,6 +187,11 @@ const TimetableManagement = () => {
 
   useEffect(() => {
     fetchData();
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('calendar') === 'connected') {
+      toast.success('Google Calendar connected successfully!');
+      window.history.replaceState({}, '', window.location.pathname);
+    }
   }, []);
 
   const fetchData = async () => {
@@ -44,7 +201,12 @@ const TimetableManagement = () => {
         axios.get(`${API_URL}/api/courses`),
         axios.get(`${API_URL}/api/timetable/conflicts`)
       ]);
-      setEntries(entriesRes.data);
+      const normalized = entriesRes.data.map(e => ({
+        ...e,
+        start_time: normalizeTime(e.start_time),
+        end_time: normalizeTime(e.end_time)
+      }));
+      setEntries(normalized);
       setCourses(coursesRes.data);
       setConflicts(conflictsRes.data);
     } catch (error) {
@@ -101,17 +263,25 @@ const TimetableManagement = () => {
   };
 
   const resetForm = () => {
-    setForm({
-      course_id: '',
-      day_of_week: 0,
-      start_time: '09:00',
-      end_time: '10:00',
-      room: ''
-    });
+    setForm({ course_id: '', day_of_week: 0, start_time: '09:00', end_time: '10:00', room: '' });
   };
 
   const getEntriesForDay = (dayIndex) => {
-    return entries.filter(e => e.day_of_week === dayIndex).sort((a, b) => a.start_time.localeCompare(b.start_time));
+    return entries
+      .filter(e => e.day_of_week === dayIndex)
+      .sort((a, b) => timeToMinutes(a.start_time) - timeToMinutes(b.start_time));
+  };
+
+  const entryStartsInSlot = (entry, slotTime) => {
+    const slotStart = timeToMinutes(slotTime);
+    const slotEnd = slotStart + 60;
+    const entryStart = timeToMinutes(entry.start_time);
+    return entryStart >= slotStart && entryStart < slotEnd;
+  };
+
+  const getEntryHeight = (entry) => {
+    const durationMinutes = timeToMinutes(entry.end_time) - timeToMinutes(entry.start_time);
+    return Math.max((durationMinutes / 60) * SLOT_HEIGHT, SLOT_HEIGHT * 0.5);
   };
 
   const getColorForCourse = (courseId) => {
@@ -124,14 +294,14 @@ const TimetableManagement = () => {
       'bg-cyan-100 border-cyan-300 text-cyan-800'
     ];
     const idx = courses.findIndex(c => c.id === courseId);
-    return colors[idx % colors.length];
+    return colors[Math.max(idx, 0) % colors.length];
   };
 
   if (loading) {
     return (
       <DashboardLayout title="Timetable Management">
         <div className="flex items-center justify-center h-64">
-          <div className="w-8 h-8 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
+          <div className="w-8 h-8 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin" />
         </div>
       </DashboardLayout>
     );
@@ -139,7 +309,6 @@ const TimetableManagement = () => {
 
   return (
     <DashboardLayout title="Timetable Management">
-      {/* Conflicts Alert */}
       {conflicts.length > 0 && (
         <Card className="mb-6 border-amber-300 bg-amber-50">
           <CardContent className="p-4">
@@ -162,6 +331,11 @@ const TimetableManagement = () => {
             <TabsTrigger value="conflicts">
               Conflicts {conflicts.length > 0 && <Badge className="ml-2 bg-red-500">{conflicts.length}</Badge>}
             </TabsTrigger>
+            <TabsTrigger value="calendar-integration">Google Calendar</TabsTrigger>
+            <TabsTrigger value="my-events" className="flex items-center gap-1.5">
+              <Calendar className="w-4 h-4" />
+              My Events
+            </TabsTrigger>
           </TabsList>
           <Button onClick={() => { resetForm(); setDialogOpen(true); }} className="bg-indigo-600 hover:bg-indigo-700">
             <Plus className="w-4 h-4 mr-2" />
@@ -176,50 +350,43 @@ const TimetableManagement = () => {
               <div className="min-w-[900px]">
                 <div className="grid grid-cols-8 border-b">
                   <div className="p-3 font-medium text-slate-500 bg-slate-50 text-center">Time</div>
-                  {DAYS.slice(0, 6).map((day, idx) => (
+                  {DAYS.map((day) => (
                     <div key={day} className="p-3 font-medium text-slate-900 bg-slate-50 text-center border-l">
                       {day}
                     </div>
                   ))}
-                  <div className="p-3 font-medium text-slate-900 bg-slate-50 text-center border-l">Sunday</div>
                 </div>
-                {TIME_SLOTS.map((time, timeIdx) => (
-                  <div key={time} className="grid grid-cols-8 border-b last:border-b-0 min-h-[80px]">
-                    <div className="p-2 text-sm text-slate-500 bg-slate-50 text-center flex items-center justify-center">
+                {TIME_SLOTS.map((time) => (
+                  <div key={time} className="grid grid-cols-8 border-b last:border-b-0" style={{ minHeight: `${SLOT_HEIGHT}px` }}>
+                    <div className="p-2 text-sm text-slate-500 bg-slate-50 text-center flex items-start justify-center pt-3">
                       {time}
                     </div>
                     {[0, 1, 2, 3, 4, 5, 6].map((dayIdx) => {
-                      const dayEntries = getEntriesForDay(dayIdx).filter(e => 
-                        e.start_time <= time && e.end_time > time
-                      );
+                      const slotEntries = getEntriesForDay(dayIdx).filter(e => entryStartsInSlot(e, time));
                       return (
                         <div key={dayIdx} className="p-1 border-l relative">
-                          {dayEntries.map((entry) => (
-                            entry.start_time === time && (
-                              <div 
-                                key={entry.id}
-                                className={`p-2 rounded border text-xs cursor-pointer transition-shadow hover:shadow-md ${getColorForCourse(entry.course_id)}`}
-                                onClick={() => openEdit(entry)}
-                                style={{
-                                  minHeight: `${(parseInt(entry.end_time) - parseInt(entry.start_time)) * 80}px`
-                                }}
-                              >
-                                <div className="font-medium truncate">{entry.course?.name || 'N/A'}</div>
-                                <div className="flex items-center gap-1 mt-1 opacity-75">
-                                  <Clock className="w-3 h-3" />
-                                  {entry.start_time} - {entry.end_time}
-                                </div>
-                                {entry.room && (
-                                  <div className="flex items-center gap-1 opacity-75">
-                                    <MapPin className="w-3 h-3" />
-                                    {entry.room}
-                                  </div>
-                                )}
-                                <div className="text-xs opacity-75 truncate mt-1">
-                                  {entry.teacher_user?.name || 'N/A'}
-                                </div>
+                          {slotEntries.map((entry) => (
+                            <div
+                              key={entry.id}
+                              className={`p-2 rounded border text-xs cursor-pointer transition-shadow hover:shadow-md mb-1 ${getColorForCourse(entry.course_id)}`}
+                              onClick={() => openEdit(entry)}
+                              style={{ height: `${getEntryHeight(entry)}px`, overflow: 'hidden' }}
+                            >
+                              <div className="font-medium truncate">{entry.course?.name || 'N/A'}</div>
+                              <div className="flex items-center gap-1 mt-1 opacity-75">
+                                <Clock className="w-3 h-3 flex-shrink-0" />
+                                <span className="truncate">{entry.start_time} - {entry.end_time}</span>
                               </div>
-                            )
+                              {entry.room && (
+                                <div className="flex items-center gap-1 opacity-75">
+                                  <MapPin className="w-3 h-3 flex-shrink-0" />
+                                  <span className="truncate">{entry.room}</span>
+                                </div>
+                              )}
+                              <div className="text-xs opacity-75 truncate mt-1">
+                                {entry.teacher_user?.name || 'N/A'}
+                              </div>
+                            </div>
                           ))}
                         </div>
                       );
@@ -243,6 +410,7 @@ const TimetableManagement = () => {
                     <TableHead className="bg-slate-50">Course</TableHead>
                     <TableHead className="bg-slate-50">Teacher</TableHead>
                     <TableHead className="bg-slate-50">Room</TableHead>
+                    <TableHead className="bg-slate-50 text-center">Calendar</TableHead>
                     <TableHead className="bg-slate-50 text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -254,6 +422,9 @@ const TimetableManagement = () => {
                       <TableCell>{entry.course?.name || 'N/A'}</TableCell>
                       <TableCell>{entry.teacher_user?.name || 'N/A'}</TableCell>
                       <TableCell>{entry.room || '-'}</TableCell>
+                      <TableCell className="text-center">
+                        <CalendarSyncButton timetableId={entry.id} isSynced={entry.is_synced_to_calendar} />
+                      </TableCell>
                       <TableCell className="text-right">
                         <Button variant="ghost" size="sm" onClick={() => openEdit(entry)}>
                           <Pencil className="w-4 h-4" />
@@ -266,7 +437,7 @@ const TimetableManagement = () => {
                   ))}
                   {entries.length === 0 && (
                     <TableRow>
-                      <TableCell colSpan={6} className="text-center py-8 text-slate-500">
+                      <TableCell colSpan={7} className="text-center py-8 text-slate-500">
                         No timetable entries yet
                       </TableCell>
                     </TableRow>
@@ -317,6 +488,26 @@ const TimetableManagement = () => {
             </CardContent>
           </Card>
         </TabsContent>
+
+        {/* Google Calendar Integration Tab */}
+        <TabsContent value="calendar-integration">
+          <GoogleCalendarIntegration />
+        </TabsContent>
+
+        {/* My Events Tab */}
+        <TabsContent value="my-events">
+          <Card className="dashboard-card">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-lg">
+                <Calendar className="w-5 h-5 text-indigo-600" />
+                My Google Calendar Events
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <GoogleEventsSection />
+            </CardContent>
+          </Card>
+        </TabsContent>
       </Tabs>
 
       {/* Add/Edit Dialog */}
@@ -329,9 +520,7 @@ const TimetableManagement = () => {
             <div className="space-y-2">
               <Label>Course *</Label>
               <Select value={form.course_id} onValueChange={(v) => setForm({...form, course_id: v})}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select course" />
-                </SelectTrigger>
+                <SelectTrigger><SelectValue placeholder="Select course" /></SelectTrigger>
                 <SelectContent>
                   {courses.map((c) => (
                     <SelectItem key={c.id} value={c.id}>{c.name} ({c.code})</SelectItem>
@@ -342,9 +531,7 @@ const TimetableManagement = () => {
             <div className="space-y-2">
               <Label>Day of Week *</Label>
               <Select value={form.day_of_week.toString()} onValueChange={(v) => setForm({...form, day_of_week: parseInt(v)})}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
+                <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {DAYS.map((day, idx) => (
                     <SelectItem key={idx} value={idx.toString()}>{day}</SelectItem>
