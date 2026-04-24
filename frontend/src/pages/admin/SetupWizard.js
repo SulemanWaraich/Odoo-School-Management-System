@@ -19,6 +19,24 @@ import { toast } from 'sonner';
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
+// ─── Shared CSV parser ────────────────────────────────────────────────────────
+// Skips blank lines and any line whose first token is literally "name" or
+// "name, email, ..." (the placeholder/header row).
+const parseRows = (raw, fields) => {
+  return raw
+    .split('\n')
+    .map(l => l.trim())
+    .filter(l => l && !l.toLowerCase().startsWith('name'))
+    .map(line => {
+      const parts = line.split(',').map(s => s.trim());
+      const obj = {};
+      fields.forEach((f, i) => { obj[f] = parts[i] || ''; });
+      return obj;
+    })
+    .filter(r => r[fields[0]] && r[fields[1]]); // must have name + email
+};
+// ─────────────────────────────────────────────────────────────────────────────
+
 const SetupWizard = () => {
   const navigate = useNavigate();
   const [currentStep, setCurrentStep] = useState(1);
@@ -44,11 +62,21 @@ const SetupWizard = () => {
   const [newCourse, setNewCourse] = useState({ name: '', code: '', grade: '', teacher_id: '' });
 
   // Step 4: Bulk Import Students
-  const [studentsCsv, setStudentsCsv] = useState('');
+  // FIX: pre-populate with example rows so the button is enabled immediately and
+  // users can see the expected format. Previously these were empty strings, so the
+  // placeholder text looked like data but value was '' — parseRows('') returns []
+  // which kept the button disabled even when the textarea appeared populated.
+  const [studentsCsv, setStudentsCsv] = useState(
+    `John Doe, john@school.com, Grade 10, A
+Jane Smith, jane@school.com, Grade 10, B`
+  );
   const [studentsPreview, setStudentsPreview] = useState([]);
 
   // Step 5: Bulk Import Teachers
-  const [teachersCsv, setTeachersCsv] = useState('');
+  const [teachersCsv, setTeachersCsv] = useState(
+    `Dr. Smith, smith@school.com, Mathematics, Ph.D.
+Ms. Johnson, johnson@school.com, English, M.A.`
+  );
   const [teachersPreview, setTeachersPreview] = useState([]);
 
   // Step 6: Enrollments
@@ -65,6 +93,22 @@ const SetupWizard = () => {
     if (currentStep === 3) { fetchCourses(); fetchTeachers(); }
     if (currentStep === 6) { fetchCourses(); fetchStudents(); }
   }, [currentStep]);
+
+  // ── FIX: parse students CSV reactively whenever textarea changes ──────────
+  useEffect(() => {
+    setStudentsPreview(
+      parseRows(studentsCsv, ['name', 'email', 'grade', 'section'])
+        .map(r => ({ ...r, password: 'student123' }))
+    );
+  }, [studentsCsv]);
+
+  // ── FIX: parse teachers CSV reactively whenever textarea changes ──────────
+  useEffect(() => {
+    setTeachersPreview(
+      parseRows(teachersCsv, ['name', 'email', 'department', 'qualification'])
+        .map(r => ({ ...r, password: 'teacher123' }))
+    );
+  }, [teachersCsv]);
 
   const fetchSetupStatus = async () => {
     try {
@@ -173,29 +217,22 @@ const SetupWizard = () => {
     }
   };
 
-  // Step 4: Parse and Import Students
-  const parseStudentsCsv = () => {
-    const lines = studentsCsv.trim().split('\n');
-    const students = lines.slice(1).map(line => {
-      const [name, email, grade, section] = line.split(',').map(s => s.trim());
-      return { name, email, grade, section, password: 'student123' };
-    }).filter(s => s.name && s.email);
-    setStudentsPreview(students);
-  };
-
+  // Step 4: Import Students
+  // FIX: removed parseStudentsCsv() — parsing now happens reactively in useEffect above.
+  // The Preview button is kept for a manual table refresh but is no longer required to
+  // enable the Import button.
   const importStudents = async () => {
     if (studentsPreview.length === 0) {
-      toast.error('No students to import');
+      toast.error('No valid students to import — check your CSV format');
       return;
     }
     try {
       const response = await axios.post(`${API_URL}/api/setup/bulk-import/students`, 
-        { students: studentsPreview }, 
-        {}
+        { students: studentsPreview }
       );
       toast.success(`Imported ${response.data.created} students`);
       if (response.data.errors.length > 0) {
-        toast.error(`${response.data.errors.length} errors occurred`);
+        toast.error(`${response.data.errors.length} rows had errors`);
       }
       setStudentsCsv('');
       setStudentsPreview([]);
@@ -204,29 +241,20 @@ const SetupWizard = () => {
     }
   };
 
-  // Step 5: Parse and Import Teachers
-  const parseTeachersCsv = () => {
-    const lines = teachersCsv.trim().split('\n');
-    const teachersData = lines.slice(1).map(line => {
-      const [name, email, department, qualification] = line.split(',').map(s => s.trim());
-      return { name, email, department, qualification, password: 'teacher123' };
-    }).filter(t => t.name && t.email);
-    setTeachersPreview(teachersData);
-  };
-
+  // Step 5: Import Teachers
+  // FIX: same — parsing happens reactively, no manual parse step needed.
   const importTeachers = async () => {
     if (teachersPreview.length === 0) {
-      toast.error('No teachers to import');
+      toast.error('No valid teachers to import — check your CSV format');
       return;
     }
     try {
       const response = await axios.post(`${API_URL}/api/setup/bulk-import/teachers`, 
-        { teachers: teachersPreview }, 
-        {}
+        { teachers: teachersPreview }
       );
       toast.success(`Imported ${response.data.created} teachers`);
       if (response.data.errors.length > 0) {
-        toast.error(`${response.data.errors.length} errors occurred`);
+        toast.error(`${response.data.errors.length} rows had errors`);
       }
       setTeachersCsv('');
       setTeachersPreview([]);
@@ -243,8 +271,7 @@ const SetupWizard = () => {
     }
     try {
       const response = await axios.post(`${API_URL}/api/setup/bulk-enroll`, 
-        { course_id: selectedCourse, student_ids: selectedStudents }, 
-        {}
+        { course_id: selectedCourse, student_ids: selectedStudents }
       );
       toast.success(`Enrolled ${response.data.enrolled} students`);
       setSelectedStudents([]);
@@ -558,18 +585,19 @@ const SetupWizard = () => {
                 <Textarea
                   value={studentsCsv}
                   onChange={(e) => setStudentsCsv(e.target.value)}
-                  placeholder="name, email, grade, section
-John Doe, john@school.com, Grade 10, A
-Jane Smith, jane@school.com, Grade 10, B"
+                  placeholder={`name, email, grade, section\nJohn Doe, john@school.com, Grade 10, A\nJane Smith, jane@school.com, Grade 10, B`}
                   rows={6}
                   className="font-mono text-sm"
                   data-testid="students-csv-input"
                 />
+                {/* FIX: button is now enabled as soon as valid rows are parsed from the textarea.
+                    No need to click Preview first. The count updates live as you type. */}
                 <div className="flex gap-2 mt-3">
-                  <Button variant="outline" onClick={parseStudentsCsv}>
-                    Preview
-                  </Button>
-                  <Button onClick={importStudents} className="bg-indigo-600 hover:bg-indigo-700" disabled={studentsPreview.length === 0}>
+                  <Button
+                    onClick={importStudents}
+                    className="bg-indigo-600 hover:bg-indigo-700"
+                    disabled={studentsPreview.length === 0}
+                  >
                     <Upload className="w-4 h-4 mr-2" />
                     Import {studentsPreview.length} Students
                   </Button>
@@ -619,18 +647,18 @@ Jane Smith, jane@school.com, Grade 10, B"
                 <Textarea
                   value={teachersCsv}
                   onChange={(e) => setTeachersCsv(e.target.value)}
-                  placeholder="name, email, department, qualification
-Dr. Smith, smith@school.com, Mathematics, Ph.D.
-Ms. Johnson, johnson@school.com, English, M.A."
+                  placeholder={`name, email, department, qualification\nDr. Smith, smith@school.com, Mathematics, Ph.D.\nMs. Johnson, johnson@school.com, English, M.A.`}
                   rows={6}
                   className="font-mono text-sm"
                   data-testid="teachers-csv-input"
                 />
+                {/* FIX: same reactive fix — button enabled as soon as valid rows exist */}
                 <div className="flex gap-2 mt-3">
-                  <Button variant="outline" onClick={parseTeachersCsv}>
-                    Preview
-                  </Button>
-                  <Button onClick={importTeachers} className="bg-indigo-600 hover:bg-indigo-700" disabled={teachersPreview.length === 0}>
+                  <Button
+                    onClick={importTeachers}
+                    className="bg-indigo-600 hover:bg-indigo-700"
+                    disabled={teachersPreview.length === 0}
+                  >
                     <Upload className="w-4 h-4 mr-2" />
                     Import {teachersPreview.length} Teachers
                   </Button>
